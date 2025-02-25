@@ -25,4 +25,4 @@ Cele:
 
 6)Korztanie z bibliotek do wizualizacji danych (plotly, seaborn,...)
 
-będzie fajnie
+będzie fajnie :)
