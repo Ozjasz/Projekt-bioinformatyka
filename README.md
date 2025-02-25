@@ -1,4 +1,4 @@
-# Projekt-bioinformatyka
+# Projekt-bioinformatyka :3
 
 Cele:
 
