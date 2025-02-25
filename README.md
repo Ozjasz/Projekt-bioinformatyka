@@ -1,6 +1,6 @@
 # Projekt-bioinformatyka
 
-Cele:
+Cele: BRUH
 
 1)Praca z API(zewnętrznym)
 
