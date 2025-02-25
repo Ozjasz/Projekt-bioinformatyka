@@ -25,5 +25,5 @@ Cele:
 
 6)Korztanie z bibliotek do wizualizacji danych (plotly, seaborn,...)
 
-
 NO FAJNIE
+
