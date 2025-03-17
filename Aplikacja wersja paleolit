@@ -1,0 +1,43 @@
+import tkinter as tk
+from tkinter import messagebox
+import requests
+
+class Pdbapka:
+
+    def __init__(self,root):
+        self.root = root
+        self.root.title("Pobieranie PDB")
+
+
+        #Widgety
+        self.pdb_id_entry = tk.Entry(root)
+        self.download_button = tk.Button(root, text = 'Pobierz PDB',command = self.download_pdb)
+        self.file_listbox = tk.Listbox(root)
+
+
+        # Rozmieszczenie
+        self.pdb_id_entry.pack()
+        self.download_button.pack()
+        self.file_listbox.pack()
+
+    #funkcja ściągająca plik PDB
+    def download_pdb(self):
+        pdb_id = self.pdb_id_entry.get().strip().lower()
+        url = f"https://files.rcsb.org/download/{pdb_id}.pdb"
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+            with open(f"{pdb_id}.pdb",'wb') as f:
+                f.write(response.content)
+            self.file_listbox.insert(tk.END, f"{pdb_id}.pdb")
+            messagebox.showinfo("Sukces", f"Plik {pdb_id}.pdb został pobrany.")
+        except requests.exceptions.RequestException as e:
+            messagebox.showerror("Błąd", f"Nie udało się pobrać pliku: {e}")
+
+
+# loop odpalający aplikacje
+if __name__ == "__main__":
+
+    root = tk.Tk()
+    app = Pdbapka(root)
+    root.mainloop()
