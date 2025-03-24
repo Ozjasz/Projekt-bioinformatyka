@@ -1,0 +1,42 @@
+import plotly.graph_objects as go
+from biopandas.pdb import PandasPdb
+import requests
+
+def download_pdb(pdb_id):
+    url = f'https://files.rcsb.org/view/{pdb_id}.pdb'
+    response = requests.get(url)
+    with open(f'{pdb_id}.pdb', 'w') as file:
+        file.write(response.text)
+    return f'{pdb_id}.pdb'
+
+def visualize_pdb_3d_box(pdb_file):
+    ppdb = PandasPdb().read_pdb(pdb_file)
+    atoms = ppdb.df['ATOM']
+
+    if atoms.empty:
+        print("Brak danych atomowych w pliku PDB!")
+        return
+   
+    x, y, z = atoms['x_coord'], atoms['y_coord'], atoms['z_coord']
+  
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter3d(
+        x=x, y=y, z=z,
+        mode='markers',
+        marker=dict(size=5, color=z, colorscale='Viridis', opacity=1.0)
+    ))
+
+    fig.update_layout(
+        scene=dict(
+            xaxis=dict(showbackground=True, showgrid=True, zeroline=True),
+            yaxis=dict(showbackground=True, showgrid=True, zeroline=True),
+            zaxis=dict(showbackground=True, showgrid=True, zeroline=True),
+        ),
+        title="Białko w pudełku 3D"
+    )
+
+    fig.show()  
+
+pdb_file = download_pdb('1GZK')
+visualize_pdb_3d_box(pdb_file)
