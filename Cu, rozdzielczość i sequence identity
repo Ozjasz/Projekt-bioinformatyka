@@ -116,7 +116,7 @@ def fetch_fasta_sequences(pdb_ids):
 
 # Example of usage
 pdb_ids = fetch_pdb_ids()
-pdb_ids = pdb_ids[:50]  #im doing the analysis for te first few proteins to chceck if everything works
+pdb_ids = pdb_ids[:30]  #analysis for the first few proteins to chceck if everything works
 print(pdb_ids)
 fasta_sequences = fetch_fasta_sequences(pdb_ids)
 print(fasta_sequences)
