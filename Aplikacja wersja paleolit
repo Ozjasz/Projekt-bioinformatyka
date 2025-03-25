@@ -2,42 +2,94 @@ import tkinter as tk
 from tkinter import messagebox
 import requests
 
+
 class Pdbapka:
+    """Główna klasa aplikacji do pobierania i wyświetlania plików PDB"""
 
-    def __init__(self,root):
+    def __init__(self, root):
+        """Inicjalizacja interfejsu graficznego aplikacji
+
+        Argumenty:
+            root (tk.Tk): Główne okno aplikacji
+        """
         self.root = root
-        self.root.title("Pobieranie PDB")
+        self.root.title("Pobieranie PDB")  # Ustawienie tytułu okna
 
+        # Tworzenie widgetów
+        self.pdb_id_entry = tk.Entry(root)  # Pole do wpisania ID PDB
+        self.download_button = tk.Button(root, text='Pobierz PDB', command=self.download_pdb)  # Przycisk pobierania
+        self.file_listbox = tk.Listbox(root)  # Lista pobranych plików
+        self.content_text = tk.Text(root)  # Pole tekstowe do wyświetlania zawartości
 
-        #Widgety
-        self.pdb_id_entry = tk.Entry(root)
-        self.download_button = tk.Button(root, text = 'Pobierz PDB',command = self.download_pdb)
-        self.file_listbox = tk.Listbox(root)
+        # Rozmieszczenie widgetów
+        self.pdb_id_entry.pack(fill=tk.X, padx=5, pady=5)
+        self.download_button.pack(fill=tk.X, padx=5, pady=5)
+        self.file_listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.content_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
+        # Powiązanie zdarzenia wyboru pliku z funkcją wyświetlającą
+        self.file_listbox.bind("<<ListboxSelect>>", self.display_file_content)
 
-        # Rozmieszczenie
-        self.pdb_id_entry.pack()
-        self.download_button.pack()
-        self.file_listbox.pack()
-
-    #funkcja ściągająca plik PDB
     def download_pdb(self):
-        pdb_id = self.pdb_id_entry.get().strip().lower()
-        url = f"https://files.rcsb.org/download/{pdb_id}.pdb"
+        """Pobieranie pliku PDB z serwera RCSB na podstawie podanego ID"""
+        pdb_id = self.pdb_id_entry.get().strip().lower()  # Pobranie i oczyszczenie ID PDB
+        url = f"https://files.rcsb.org/download/{pdb_id}.pdb"  # Budowanie URL do pobrania
+
         try:
+            # Wysłanie żądania HTTP
             response = requests.get(url)
-            response.raise_for_status()
-            with open(f"{pdb_id}.pdb",'wb') as f:
+            response.raise_for_status()  # Sprawdzenie błędów HTTP
+
+            # Zapisanie pobranego pliku
+            with open(f"{pdb_id}.pdb", 'wb') as f:
                 f.write(response.content)
+
+            # Dodanie pliku do listy i pokazanie komunikatu
             self.file_listbox.insert(tk.END, f"{pdb_id}.pdb")
             messagebox.showinfo("Sukces", f"Plik {pdb_id}.pdb został pobrany.")
+
         except requests.exceptions.RequestException as e:
+            # Komunikat o błędzie gdy pobieranie się nie powiedzie
             messagebox.showerror("Błąd", f"Nie udało się pobrać pliku: {e}")
 
+    def display_file_content(self, event):
+        """Wyświetlanie informacji o rozdzielczości z wybranego pliku PDB
 
-# loop odpalający aplikacje
+        Argumenty:
+            event: Obiekt zdarzenia wyboru z listboxa
+        """
+        try:
+            # Pobranie wybranego pliku z listy
+            selection = self.file_listbox.curselection()
+            if not selection:  # Jeśli nic nie wybrano - zakończ
+                return
+
+            selected_file = self.file_listbox.get(selection[0])
+
+            # Odczyt zawartości pliku PDB
+            with open(selected_file, "r", encoding="utf-8") as f:
+                pdb_lines = f.readlines()
+
+            # Domyślny komunikat jeśli nie znajdziemy rozdzielczości
+            resolution = "Nie znaleziono informacji o rozdzielczości"
+
+            # Szukanie informacji o rozdzielczości w liniach REMARK
+            for line in pdb_lines:
+                if line.startswith("REMARK   2 RESOLUTION."):
+                    resolution = line.split("RESOLUTION.")[1].strip()
+                    break
+
+            # Wyświetlenie rozdzielczości w polu tekstowym
+            self.content_text.delete(1.0, tk.END)
+            self.content_text.insert(tk.END, f"Rozdzielczość: {resolution}")
+
+        except Exception as e:
+            # Komunikat o błędzie jeśli coś pójdzie nie tak
+            messagebox.showerror("Błąd", str(e))
+
+
+# Główna pętla aplikacji
 if __name__ == "__main__":
-
-    root = tk.Tk()
-    app = Pdbapka(root)
-    root.mainloop()
+    root = tk.Tk()  # Utworzenie głównego okna
+    app = Pdbapka(root)  # Inicjalizacja aplikacji
+    root.mainloop()  # Uruchomienie pętli zdarzeń
