@@ -342,4 +342,5 @@ def filter_proteins(identity_matrix, protein_groups, pdb_ids):   #To jeszcze do 
     return filtered_groups
 
 filtered_groups = filter_proteins(identity_matrix, protein_groups, pdb_ids)
+print("Przefiltrowane grupy")
 print(filtered_groups)
