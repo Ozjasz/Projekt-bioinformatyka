@@ -3,12 +3,6 @@ from biopandas.pdb import PandasPdb
 import requests
 
 def download_pdb(pdb_id):
-    """
-    Pobiera plik PDB z serwera RCSB i zapisuje go lokalnie.
-    
-    :param pdb_id: Identyfikator białka w bazie RCSB PDB (np. '1GZK')
-    :return: Nazwa zapisanego pliku PDB
-    """
     url = f'https://files.rcsb.org/view/{pdb_id}.pdb'
     response = requests.get(url)
     with open(f'{pdb_id}.pdb', 'w') as file:
@@ -16,11 +10,6 @@ def download_pdb(pdb_id):
     return f'{pdb_id}.pdb'
    
 def visualize_pdb_3d_box(pdb_file):
-    """
-    Wizualizuje atomy z pliku PDB w przestrzeni 3D za pomocą Plotly.
-    
-    :param pdb_file: Ścieżka do pliku PDB
-    """
     ppdb = PandasPdb().read_pdb(pdb_file)
     atoms = ppdb.df['ATOM']
 
@@ -29,26 +18,33 @@ def visualize_pdb_3d_box(pdb_file):
         return
    
     x, y, z = atoms['x_coord'], atoms['y_coord'], atoms['z_coord']
-  
+    
+    x_min, x_max = min(x), max(x)
+    y_min, y_max = min(y), max(y)
+    z_min, z_max = min(z), max(z)
+    
+    x_new = (x - x_min) / (x_max - x_min) * 18
+    y_new = (y - y_min) / (y_max - y_min) * 18
+    z_new = (z - z_min) / (z_max - z_min) * 18
+    
     fig = go.Figure()
 
     fig.add_trace(go.Scatter3d(
-        x=x, y=y, z=z,
+        x=x_new, y=y_new, z=z_new,
         mode='markers',
-        marker=dict(size=5, color=z, colorscale='Viridis', opacity=1.0)
+        marker=dict(size=5, color=z_new, colorscale='Viridis', opacity=1.0)
     ))
-
+    
     fig.update_layout(
         scene=dict(
-            xaxis=dict(showbackground=True, showgrid=True, zeroline=True),
-            yaxis=dict(showbackground=True, showgrid=True, zeroline=True),
-            zaxis=dict(showbackground=True, showgrid=True, zeroline=True),
+            xaxis=dict(range=[0, 18], showbackground=True, showgrid=True, zeroline=True, tickmode='linear', dtick=1),
+            yaxis=dict(range=[0, 18], showbackground=True, showgrid=True, zeroline=True, tickmode='linear', dtick=1),
+            zaxis=dict(range=[0, 18], showbackground=True, showgrid=True, zeroline=True, tickmode='linear', dtick=1),
         ),
-        title="Białko w pudełku 3D"
+        title="Białko w pudełku 18x18x18"
     )
 
-    fig.show()  
+    fig.show()
 
-# Pobranie i wizualizacja struktury białka
 pdb_file = download_pdb('1GZK')
 visualize_pdb_3d_box(pdb_file)
