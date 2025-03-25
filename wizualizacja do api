@@ -1,0 +1,117 @@
+import tkinter as tk
+from tkinter import messagebox
+import requests
+import pandas as pd
+import plotly.graph_objects as go
+import webbrowser
+
+
+class Pdbapka:
+
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Pobieranie i wizualizacja PDB")
+
+        # Widgety
+        self.pdb_id_entry = tk.Entry(root)
+        self.download_button = tk.Button(root, text='Pobierz i wyświetl', command=self.download_and_plot)
+        self.file_listbox = tk.Listbox(root)
+
+        # Rozmieszczenie
+        self.pdb_id_entry.pack()
+        self.download_button.pack()
+        self.file_listbox.pack()
+
+    def download_and_plot(self):
+        pdb_id = self.pdb_id_entry.get().strip().lower()
+        url = f"https://files.rcsb.org/download/{pdb_id}.pdb"
+
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+            filename = f"{pdb_id}.pdb"
+
+            with open(filename, 'wb') as f:
+                f.write(response.content)
+
+            self.file_listbox.insert(tk.END, f"{filename}")
+            messagebox.showinfo("Sukces", f"Pobrano plik {filename}.")
+
+            self.visualize_pdb(response.text)
+
+        except requests.exceptions.RequestException as e:
+            messagebox.showerror("Błąd", f"Nie udało się pobrać pliku: {e}")
+
+    def visualize_pdb(self, pdb_text):
+        atom_lines = [line for line in pdb_text.splitlines() if line.startswith("ATOM")]
+
+        df = pd.DataFrame(columns=[
+            'atom', 'serial', 'name', 'altLoc', 'resName',
+            'chainID', 'resSeq', 'iCode', 'x', 'y', 'z',
+            'occupancy', 'tempFactor', 'element'
+        ])
+
+        for atom_line in atom_lines:
+            try:
+                atom = atom_line[0:6].strip()
+                serial = atom_line[6:11].strip()
+                name = atom_line[12:16].strip()
+                altLoc = atom_line[16].strip()
+                resName = atom_line[17:20].strip()
+                chainID = atom_line[21].strip()
+                resSeq = atom_line[22:26].strip()
+                iCode = atom_line[26].strip()
+                x = float(atom_line[30:38].strip())
+                y = float(atom_line[38:46].strip())
+                z = float(atom_line[46:54].strip())
+                occupancy = atom_line[54:60].strip()
+                tempFactor = atom_line[60:66].strip()
+                element = atom_line[76:78].strip()
+
+                df.loc[len(df)] = [
+                    atom, serial, name, altLoc, resName, chainID, resSeq, iCode,
+                    x, y, z, occupancy, tempFactor, element
+                ]
+            except:
+                continue
+
+        x = df['x'].astype(float).values
+        y = df['y'].astype(float).values
+        z = df['z'].astype(float).values
+        elements = df['element'].values
+
+        element_colors = {
+            'C': 'red', 'O': 'violet', 'N': 'blue',
+            'H': 'black', 'S': 'green', 'P': 'orange'
+        }
+        colors = [element_colors.get(e.strip(), 'green') for e in elements]
+
+        fig = go.Figure(data=[go.Scatter3d(
+            x=x,
+            y=y,
+            z=z,
+            mode='markers',
+            marker=dict(
+                size=6,
+                color=colors,
+                opacity=0.8
+            )
+        )])
+
+        fig.update_layout(
+            margin=dict(l=0, r=0, b=0, t=0),
+            scene=dict(
+                xaxis_title='X',
+                yaxis_title='Y',
+                zaxis_title='Z'
+            )
+        )
+
+        fig.write_html("structure.html")
+        webbrowser.open("structure.html")
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = Pdbapka(root)
+    root.mainloop()
