@@ -3,13 +3,24 @@ from biopandas.pdb import PandasPdb
 import requests
 
 def download_pdb(pdb_id):
+    """
+    Pobiera plik PDB z serwera RCSB i zapisuje go lokalnie.
+    
+    :param pdb_id: Identyfikator białka w bazie RCSB PDB (np. '1GZK')
+    :return: Nazwa zapisanego pliku PDB
+    """
     url = f'https://files.rcsb.org/view/{pdb_id}.pdb'
     response = requests.get(url)
     with open(f'{pdb_id}.pdb', 'w') as file:
         file.write(response.text)
     return f'{pdb_id}.pdb'
-
+   
 def visualize_pdb_3d_box(pdb_file):
+    """
+    Wizualizuje atomy z pliku PDB w przestrzeni 3D za pomocą Plotly.
+    
+    :param pdb_file: Ścieżka do pliku PDB
+    """
     ppdb = PandasPdb().read_pdb(pdb_file)
     atoms = ppdb.df['ATOM']
 
@@ -38,5 +49,6 @@ def visualize_pdb_3d_box(pdb_file):
 
     fig.show()  
 
+# Pobranie i wizualizacja struktury białka
 pdb_file = download_pdb('1GZK')
 visualize_pdb_3d_box(pdb_file)
