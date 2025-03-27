@@ -5,15 +5,16 @@ def fetch_pdb_ids():
     Fetches PDB identifiers for structures containing Cu²⁺ (copper ion) 
     and meeting resolution criteria (0.5-1.5 Å) from the RCSB PDB database.
 
-    It sends a query to the RCSB PDB API and filters results based on:
-    - Presence of Cu²⁺ ligand
-    - Resolution range between 0.5 and 1.5 Å
+    Parameters
+    ----------
+    None
 
-    The results are saved to a file "pdb_ids.txt".
-
-    Returns:
-        list: A list of retrieved PDB identifiers.
+    Returns
+    -------
+    list of str
+        A list of retrieved PDB identifiers.
     """
+
     search_url = "https://search.rcsb.org/rcsbsearch/v2/query"
 
     query = {
@@ -90,15 +91,20 @@ def fetch_pdb_ids():
         print("Błąd w pobieraniu danych:", response.status_code, response.text)
         return []
 
+
 def fetch_fasta_sequences(pdb_ids):
-    """
+     """
     Fetches FASTA sequences for given PDB identifiers and saves them to a file.
 
-    Args:
-        pdb_ids (list): List of PDB identifiers.
+    Parameters
+    ----------
+    pdb_ids : list of str
+        List of PDB identifiers.
 
-    Returns:
-        list: A list of retrieved FASTA sequences.
+    Returns
+    -------
+    list of str
+        A list of retrieved FASTA sequences.
     """
     fasta_sequences = []
     
@@ -130,13 +136,19 @@ def run_clustal_omega(fasta_sequences, email):
     """
     Sends FASTA sequences to Clustal Omega for multiple sequence alignment (MSA).
 
-    Args:
-        fasta_sequences (list): List of FASTA sequences.
-        email (str): Email address required by the API.
+    Parameters
+    ----------
+    fasta_sequences : list of str
+        List of FASTA sequences.
+    email : str
+        Email address required by the API.
 
-    Returns:
-        str: The MSA result in FASTA format, or None if an error occurs.
+    Returns
+    -------
+    str or None
+        The MSA result in FASTA format, or None if an error occurs.
     """
+   
     sequences_to_clustal = "\n".join(fasta_sequences)
 
     response = requests.post(
@@ -174,12 +186,17 @@ def run_mview(msa_data, email):
     """
     Sends the MSA result from Clustal Omega to MView for visualization.
 
-    Args:
-        msa_data (str): MSA result in FASTA format.
-        email (str): Email address required by the API.
+    Parameters
+    ----------
+    msa_data : str
+        MSA result in FASTA format.
+    email : str
+        Email address required by the API.
 
-    Returns:
-        str: The MView result in PIM format, or None if an error occurs.
+    Returns
+    -------
+    str or None
+        The MView result in PIM format, or None if an error occurs.
     """
     response = requests.post(
         "https://www.ebi.ac.uk/Tools/services/rest/mview/run",
@@ -228,11 +245,15 @@ def parse_mview_output(output):
     """
     Parses the MView output into a NumPy matrix and replaces NaN values with infinity.
 
-    Args:
-        output (str): The MView result as a text string.
+    Parameters
+    ----------
+    output : str
+        The MView result as a text string.
 
-    Returns:
-        np.ndarray: A NumPy array representing the identity matrix with NaN replaced by np.inf.
+    Returns
+    -------
+    np.ndarray
+        A NumPy array representing the identity matrix with NaN replaced by np.inf.
     """
     lines = output.strip().split("\n")
     matrix_data = []
@@ -266,14 +287,20 @@ def find_low_similarity_pairs(matrix, pdb_ids, threshold=30):
     This function analyzes a similarity matrix and groups proteins that have a 
     similarity score below the specified threshold.
 
-    Args:
-        matrix (numpy.ndarray): A square matrix containing pairwise similarity scores.
-        pdb_ids (list): A list of protein pdb identifiers corresponding to the matrix rows/columns.
-        threshold (float, optional): The similarity percentage threshold. Pairs below this value are grouped. Default is 30.
+    Parameters
+    ----------
+    matrix : numpy.ndarray
+        A square matrix containing pairwise similarity scores.
+    pdb_ids : list of str
+        A list of protein PDB identifiers corresponding to the matrix rows/columns.
+    threshold : float, optional
+        The similarity percentage threshold. Pairs below this value are grouped. Default is 30.
 
-    Returns:
-        list: A list of lists, where each sublist contains a protein ID followed by 
-              IDs of proteins with similarity below the threshold.
+    Returns
+    -------
+    list of list of str
+        A list of lists, where each sublist contains a protein ID followed by 
+        IDs of proteins with similarity below the threshold.
     """
     protein_groups = []
     for row_idx, row in enumerate(matrix):
@@ -297,17 +324,21 @@ def filter_proteins(identity_matrix, protein_groups, pdb_ids):   #To jeszcze do 
     This function takes a matrix of sequence identities and removes proteins from groups 
     if they have more than 30% identity with any other protein in the same group.
 
-    Args:
-        identity_matrix (np.ndarray): A square matrix where each element (i, j) represents 
-                                      the sequence identity percentage between protein i and j.
-        protein_groups (list of list of str): A list of protein groups, where each group 
-                                              is a list of protein pdb IDs.
-        pdb_ids (list of str): A list of all protein pdb IDs corresponding to the indices in 
-                                   the identity matrix.
+    Parameters
+    ----------
+    identity_matrix : np.ndarray
+        A square matrix where each element (i, j) represents the sequence identity 
+        percentage between protein i and j.
+    protein_groups : list of list of str
+        A list of protein groups, where each group is a list of protein PDB IDs.
+    pdb_ids : list of str
+        A list of all protein PDB IDs corresponding to the indices in the identity matrix.
 
-    Returns:
-        list of list of str: A filtered list of protein groups, where highly similar proteins 
-                             (identity > 30%) have been removed.
+    Returns
+    -------
+    list of list of str
+        A filtered list of protein groups, where highly similar proteins 
+        (identity > 30%) have been removed.
     """
     protein_index = {protein: idx for idx, protein in enumerate(pdb_ids)}  #{pdb_id:index_in_matrix}
     
