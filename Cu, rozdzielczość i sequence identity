@@ -1,6 +1,7 @@
 import requests
 
 def fetch_pdb_ids():
+   
     """
     Fetches PDB identifiers for structures containing Cu²⁺ (copper ion) 
     and meeting resolution criteria (0.5-1.5 Å) from the RCSB PDB database.
@@ -14,6 +15,7 @@ def fetch_pdb_ids():
     list of str
         A list of retrieved PDB identifiers.
     """
+
 
     search_url = "https://search.rcsb.org/rcsbsearch/v2/query"
 
@@ -33,7 +35,7 @@ def fetch_pdb_ids():
                 },
                 {
                     "type": "group",
-                    "logical_operator": "or",
+                    "logical_operator": "and",
                     "nodes": [
                         {
                             "type": "terminal",
@@ -43,26 +45,13 @@ def fetch_pdb_ids():
                                 "operator": "range",
                                 "value": {
                                     "from": 0.5,
-                                    "to": 1.0,
-                                    "include_lower": True,
-                                    "include_upper": False
-                                }
-                            }
-                        },
-                        {
-                            "type": "terminal",
-                            "service": "text",
-                            "parameters": {
-                                "attribute": "rcsb_entry_info.resolution_combined",
-                                "operator": "range",
-                                "value": {
-                                    "from": 1.0,
                                     "to": 1.5,
                                     "include_lower": True,
                                     "include_upper": False
                                 }
                             }
-                        }
+                        },
+                        
                     ]
                 }
             ]
@@ -78,6 +67,7 @@ def fetch_pdb_ids():
 
     response = requests.post(search_url, json=query, headers={"Content-Type": "application/json"})
 
+
     if response.status_code == 200:
         data = response.json()
         pdb_ids = [entry["identifier"] for entry in data["result_set"]]
@@ -86,14 +76,15 @@ def fetch_pdb_ids():
             f.write("\n".join(pdb_ids))
 
         print(f"Pobrano {len(pdb_ids)} PDB ID i zapisano do pdb_ids.txt")
+        #print(data)
         return pdb_ids
     else:
         print("Błąd w pobieraniu danych:", response.status_code, response.text)
         return []
-
+    
 
 def fetch_fasta_sequences(pdb_ids):
-     """
+    """
     Fetches FASTA sequences for given PDB identifiers and saves them to a file.
 
     Parameters
@@ -106,6 +97,7 @@ def fetch_fasta_sequences(pdb_ids):
     list of str
         A list of retrieved FASTA sequences.
     """
+
     fasta_sequences = []
     
     for pdb_id in pdb_ids:
@@ -117,17 +109,15 @@ def fetch_fasta_sequences(pdb_ids):
     with open("sequences.fasta", "w") as f:
         f.writelines(fasta_sequences)
     
-    print("Pobrano sekwencje FASTA")
+    print("Pobrano i zapisano sekwencje FASTA do sequences.fasta")
     return fasta_sequences
 
-# Example of usage
+
 pdb_ids = fetch_pdb_ids()
-pdb_ids = pdb_ids[:10]  #analysis for the first few proteins to chceck if everything works
-print(pdb_ids)
+#pdb_ids = pdb_ids[:10]  #im doing the analysis for te first few proteins to chceck if everything works
+#print(pdb_ids)
 fasta_sequences = fetch_fasta_sequences(pdb_ids)
-print(fasta_sequences)
-
-
+#print(fasta_sequences)
 
 
 import time
@@ -148,7 +138,7 @@ def run_clustal_omega(fasta_sequences, email):
     str or None
         The MSA result in FASTA format, or None if an error occurs.
     """
-   
+
     sequences_to_clustal = "\n".join(fasta_sequences)
 
     response = requests.post(
@@ -175,11 +165,13 @@ def run_clustal_omega(fasta_sequences, email):
     if response.status_code == 200:
         msa_data = response.text
         print("Clustal Omega completed successfully.")
+        with open("CU_clustal_omega_result.fasta", "w") as file:
+            file.write(msa_data)
+        print("Clustal Omega completed successfully. Results saved to clustal_omega_result.fasta")
         return msa_data
     else:
         print(f"Error retrieving Clustal Omega results: {response.status_code}")
         return None
-
 
 
 def run_mview(msa_data, email):
@@ -198,6 +190,7 @@ def run_mview(msa_data, email):
     str or None
         The MView result in PIM format, or None if an error occurs.
     """
+
     response = requests.post(
         "https://www.ebi.ac.uk/Tools/services/rest/mview/run",
         data={
@@ -212,7 +205,7 @@ def run_mview(msa_data, email):
     print(f"MView job started, job ID: {job_id}")
 
     while status != "FINISHED":
-        time.sleep(20)
+        time.sleep(60)
         response = requests.get(f"https://www.ebi.ac.uk/Tools/services/rest/mview/status/{job_id}")
         status = response.text.upper()
         print(f"MView status: {status}")
@@ -222,21 +215,24 @@ def run_mview(msa_data, email):
     if response.status_code == 200:
         mview_result = response.text
         print("MView completed successfully.")
+        with open("CU_mview_result.pim", "w") as file:
+            file.write(mview_result)
+        print("MView completed successfully. Results saved to mview_result.pim")
         return mview_result
+        
     else:
         print(f"Error retrieving MView results: {response.status_code}")
         return None
 
-# Example usage
-email = "a.filipiak@studms.ug.edu.pl"
+
+email = "a.filipiak.943@studms.ug.edu.pl"
 
 msa_result = run_clustal_omega(fasta_sequences, email)
+#print(msa_result)
 
 if msa_result:
     mview_result = run_mview(msa_result, email)
     print(mview_result)
-
-
 
 
 import numpy as np
@@ -255,6 +251,7 @@ def parse_mview_output(output):
     np.ndarray
         A NumPy array representing the identity matrix with NaN replaced by np.inf.
     """
+
     lines = output.strip().split("\n")
     matrix_data = []
 
@@ -264,7 +261,7 @@ def parse_mview_output(output):
         
         parts = line.split()[2:]  # Keep only numerical values
 
-        if parts:  # Ensures there is at least one value before converting
+        if parts:  
             matrix_data.append([float(x) for x in parts])
     
     matrix = np.array(matrix_data)
@@ -277,6 +274,60 @@ def parse_mview_output(output):
 identity_matrix = parse_mview_output(mview_result)
 
 print(identity_matrix)
+
+
+
+
+def remove_duplicate_sequences(identity_matrix, pdb_ids):
+    """
+    Removes duplicate sequences based on 100% identity in the matrix.
+
+    Parameters
+    ----------
+    identity_matrix : np.ndarray
+        A square identity matrix where element (i, j) represents the percentage identity between sequence i and j.
+    pdb_ids : list of str
+        A list of PDB IDs corresponding to the sequence order in the matrix.
+
+    Returns
+    -------
+    tuple
+        - number of removed sequences
+        - new matrix shape
+        - filtered identity matrix (np.ndarray)
+
+    Results are saved to files:
+        - "cleaned_identity_matrix.txt" (new identity matrix)
+        - "cleaned_pdb_ids.txt" (list of unique PDB IDs)
+        - filtered_matrix in numpy format
+        - filtered_pdb_ids as a list
+    """
+    n = len(pdb_ids)
+    to_remove = set()
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if identity_matrix[i, j] == 100:  
+                to_remove.add(pdb_ids[j])  
+
+    filtered_pdb_ids = [p for p in pdb_ids if p not in to_remove]
+    indices = [pdb_ids.index(p) for p in filtered_pdb_ids]
+    filtered_matrix = identity_matrix[np.ix_(indices, indices)]
+
+    
+    np.savetxt("cleaned_identity_matrix.txt", filtered_matrix, fmt="%.2f")
+    with open("cleaned_pdb_ids.txt", "w") as f:
+        for pdb in filtered_pdb_ids:
+            f.write(pdb + "\n")
+
+    return len(to_remove), filtered_matrix.shape, filtered_matrix, filtered_pdb_ids
+
+
+removed_count, new_shape, cleaned_matrix, cleaned_pdb_ids = remove_duplicate_sequences(identity_matrix, pdb_ids)
+
+print(f"Removed {removed_count} duplicate sequences.")
+print(f"New matrix shape: {new_shape}")
+print(cleaned_matrix)
 
 
 
@@ -302,6 +353,7 @@ def find_low_similarity_pairs(matrix, pdb_ids, threshold=30):
         A list of lists, where each sublist contains a protein ID followed by 
         IDs of proteins with similarity below the threshold.
     """
+
     protein_groups = []
     for row_idx, row in enumerate(matrix):
         low_similarity_proteins = [
@@ -310,19 +362,27 @@ def find_low_similarity_pairs(matrix, pdb_ids, threshold=30):
             if col_idx != row_idx and value < threshold
         ]
         protein_groups.append([pdb_ids[row_idx]] + low_similarity_proteins)
+
+    with open("low_similarity_pairs.txt", "w") as file:
+        for entry in protein_groups:
+            file.write(" ".join(entry) + "\n")
+    
+    print("Low similarity pairs saved to low_similarity_pairs.txt")
     return protein_groups
 
-protein_groups = find_low_similarity_pairs(identity_matrix, pdb_ids)
+protein_groups = find_low_similarity_pairs(cleaned_matrix, cleaned_pdb_ids)
 for entry in protein_groups:
     print(entry)
 
 
-def filter_proteins(identity_matrix, protein_groups, pdb_ids):   #To jeszcze do doszlifowania!
+
+
+def filter_proteins(identity_matrix, protein_groups, pdb_ids):
     """
     Filters protein groups based on pairwise sequence identity.
 
-    This function takes a matrix of sequence identities and removes proteins from groups 
-    if they have more than 30% identity with any other protein in the same group.
+    This function takes a matrix of sequence identities and removes minimal necessary proteins 
+    from groups if they have more than 30% identity with others.
 
     Parameters
     ----------
@@ -337,41 +397,140 @@ def filter_proteins(identity_matrix, protein_groups, pdb_ids):   #To jeszcze do 
     Returns
     -------
     list of list of str
-        A filtered list of protein groups, where highly similar proteins 
-        (identity > 30%) have been removed.
+        A filtered list of all (filtered_groups) and of the biggest (largest_groups) protein groups, 
+        where highly similar proteins (identity > 30%) have been minimized.
     """
-    protein_index = {protein: idx for idx, protein in enumerate(pdb_ids)}  #{pdb_id:index_in_matrix}
-    
-    filtered_groups = []
-    
-    for group in protein_groups:
-        filtered_group = []
-        
-        for i, protein in enumerate(group):
-            if protein not in protein_index:
-                continue
-            keep = True   #protein stays in the group
-            
-            for j in range(i + 1, len(group)):
-                other_protein = group[j]
-                
-                if other_protein not in protein_index:
-                    continue
-                
-                idx1, idx2 = protein_index[protein], protein_index[other_protein]
-                identity = identity_matrix[idx1][idx2]
-                
-                if identity > 30:
-                    keep = False   #protein bye bye
-                    break
-            
-            if keep:
-                filtered_group.append(protein)
-        
-        filtered_groups.append(filtered_group)
-    
-    return filtered_groups
 
-filtered_groups = filter_proteins(identity_matrix, protein_groups, pdb_ids)
-print("Przefiltrowane grupy")
+    protein_index = {protein: idx for idx, protein in enumerate(pdb_ids)}
+    filtered_groups = []
+
+    for group in protein_groups:
+        if len(group) < 2:  
+            filtered_groups.append(group)
+            continue
+        
+        conflict_graph = {protein: set() for protein in group}  
+
+        for i in range(len(group)):
+            for j in range(i + 1, len(group)):
+                if group[i] not in protein_index or group[j] not in protein_index:
+                    continue
+
+                idx1, idx2 = protein_index[group[i]], protein_index[group[j]]
+                if identity_matrix[idx1, idx2] > 30:
+                    conflict_graph[group[i]].add(group[j])
+                    conflict_graph[group[j]].add(group[i])
+
+        # Remove proteins with conflicts until no conflicts remain
+        while any(len(conflict_graph[p]) > 0 for p in conflict_graph):
+            worst_protein = max(conflict_graph, key=lambda p: len(conflict_graph[p]))
+            del conflict_graph[worst_protein]
+
+            for p in conflict_graph:
+                conflict_graph[p].discard(worst_protein)
+
+        filtered_groups.append(list(conflict_graph.keys()))
+
+    max_size = max(len(group) for group in filtered_groups)
+    largest_groups = [group for group in filtered_groups if len(group) == max_size]
+
+    with open("groups_to_analyze.txt", "w") as file:
+        for group in largest_groups:
+            file.write(" ".join(group) + "\n")
+
+    print(f"Groups to analyze saved to groups_to_analyze.txt, with {len(largest_groups)} group(s) of size {max_size}")
+
+    return filtered_groups, largest_groups
+
+
+filtered_groups, groups_to_analyze = filter_proteins(identity_matrix, protein_groups, pdb_ids)
+
+print('Filtered groups')
 print(filtered_groups)
+print('The biggest group(s):')
+print(groups_to_analyze)
+
+
+import requests
+
+def get_pdb_resolutions(pdb_ids):
+    """
+    Retrieves the resolution for each PDB ID from the RCSB PDB API and returns them in a dictionary.
+
+    Parameters
+    ----------
+    pdb_ids : list of str
+        A list of PDB IDs to fetch the resolution data for.
+
+    Returns
+    -------
+    dict
+        A dictionary where keys are PDB IDs and values are their corresponding resolutions.
+        If a resolution cannot be fetched, the value will be `None`.
+    """
+    resolutions = {}
+
+    for pdb_id in pdb_ids:
+        url = f"https://data.rcsb.org/rest/v1/core/entry/{pdb_id}"
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+            data = response.json()
+            resolution = data.get("rcsb_entry_info", {}).get("resolution_combined", [None])[0]
+            resolutions[pdb_id] = resolution
+        except:
+            resolutions[pdb_id] = None  
+
+    return resolutions
+
+
+def select_best_group(groups_to_analyze, pdb_resolutions):
+    """
+    Selects the group with the best (lowest) combined resolution from the provided groups and writes it to a file.
+
+    Parameters
+    ----------
+    groups_to_analyze : list of list of str
+        A list of protein groups, where each group is a list of PDB IDs.
+    pdb_resolutions : dict
+        A dictionary containing PDB IDs as keys and their corresponding resolutions as values.
+
+    Returns
+    -------
+    list of str
+        The group with the best (lowest) combined resolution. If no valid group can be found, returns an empty list.
+    """
+    if len(groups_to_analyze) <= 1:
+        return groups_to_analyze[0] if groups_to_analyze else []
+
+    best_group = None
+    best_resolution_sum = float("inf")
+
+    for group in groups_to_analyze:
+        total_resolution = 0
+        valid_count = 0
+
+        for pdb_id in group:
+            resolution = pdb_resolutions.get(pdb_id)
+            if resolution is not None:
+                total_resolution += resolution
+                valid_count += 1
+
+        if valid_count == len(group):  
+            if total_resolution < best_resolution_sum:
+                best_resolution_sum = total_resolution
+                best_group = group
+
+    if best_group:
+        with open("best_group.txt", "w") as file:
+            file.write("Best group with the lowest resolution: \n")
+            for pdb_id in best_group:
+                file.write(f"{pdb_id}\n")
+    
+    return best_group if best_group else []
+
+
+resolutions = get_pdb_resolutions(cleaned_pdb_ids)
+final_group = select_best_group(groups_to_analyze, resolutions)
+print('The best final group:')
+print(final_group)
