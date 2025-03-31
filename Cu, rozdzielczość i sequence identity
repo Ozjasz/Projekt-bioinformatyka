@@ -312,7 +312,7 @@ def remove_duplicate_sequences(identity_matrix, pdb_ids):
 
     filtered_pdb_ids = [p for p in pdb_ids if p not in to_remove]
     indices = [pdb_ids.index(p) for p in filtered_pdb_ids]
-    filtered_matrix = identity_matrix[np.ix_(indices, indices)]
+    filtered_matrix = identity_matrix[np.ix_(indices, indices)] #new matrix with pdb_id in indices list
 
     
     np.savetxt("cleaned_identity_matrix.txt", filtered_matrix, fmt="%.2f")
@@ -401,7 +401,7 @@ def filter_proteins(identity_matrix, protein_groups, pdb_ids):
         where highly similar proteins (identity > 30%) have been minimized.
     """
 
-    protein_index = {protein: idx for idx, protein in enumerate(pdb_ids)}
+    protein_index = {protein: idx for idx, protein in enumerate(pdb_ids)}  #{pdb_id:idx}
     filtered_groups = []
 
     for group in protein_groups:
@@ -409,8 +409,9 @@ def filter_proteins(identity_matrix, protein_groups, pdb_ids):
             filtered_groups.append(group)
             continue
         
-        conflict_graph = {protein: set() for protein in group}  
+        conflict_graph = {protein: set() for protein in group}  #{pdb_id : pdb_ids with seq ident >30%}
 
+        #filling the conflict graph
         for i in range(len(group)):
             for j in range(i + 1, len(group)):
                 if group[i] not in protein_index or group[j] not in protein_index:
@@ -425,14 +426,14 @@ def filter_proteins(identity_matrix, protein_groups, pdb_ids):
         while any(len(conflict_graph[p]) > 0 for p in conflict_graph):
             worst_protein = max(conflict_graph, key=lambda p: len(conflict_graph[p]))
             del conflict_graph[worst_protein]
-
+                                                          #removing the pdb_id with the most conflicts
             for p in conflict_graph:
                 conflict_graph[p].discard(worst_protein)
 
         filtered_groups.append(list(conflict_graph.keys()))
 
     max_size = max(len(group) for group in filtered_groups)
-    largest_groups = [group for group in filtered_groups if len(group) == max_size]
+    largest_groups = [group for group in filtered_groups if len(group) == max_size] #finding the biggest groups :)
 
     with open("groups_to_analyze.txt", "w") as file:
         for group in largest_groups:
@@ -451,7 +452,6 @@ print('The biggest group(s):')
 print(groups_to_analyze)
 
 
-import requests
 
 def get_pdb_resolutions(pdb_ids):
     """
@@ -508,7 +508,7 @@ def select_best_group(groups_to_analyze, pdb_resolutions):
 
     for group in groups_to_analyze:
         total_resolution = 0
-        valid_count = 0
+        valid_count = 0   #amount of pdb_ids in group with resolution value mentioned (just in case ;) )
 
         for pdb_id in group:
             resolution = pdb_resolutions.get(pdb_id)
