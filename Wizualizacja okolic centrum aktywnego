@@ -1,0 +1,144 @@
+from Bio.PDB import PDBList, PDBParser, NeighborSearch
+import plotly.graph_objects as go
+from biopandas.pdb import PandasPdb
+
+def download_pdb_file(pdb_id):
+    """Downloads PDB file and saves it locally.
+
+    Parameters
+    ----------
+    pdb_id : string
+        PDB ID of the target protein.
+
+    Returns
+    -------
+    string
+        Path to the downloaded file.
+    """
+    pdbl = PDBList()
+    pdb_file = pdbl.retrieve_pdb_file(pdb_id, file_format="pdb")
+    return pdb_file
+
+def extract_active_site(pdb_file, cutoff=5.0):
+    """Extracts the protein's active site and its ligand (copper ion) from the PDB file.
+
+    Parameters
+    ----------
+    pdb_file : string
+        Path to the target PDB file.
+    cutoff : float, optional
+        Defines the active site as residues within a certain distance from the ligand.
+        The distance is measured in angstroms, by default 5.0.
+
+    Returns
+    -------
+    tuple
+        copper_atoms : list of ndarray
+            List of coordinates for copper atoms.
+        active_site_atoms : list of ndarray
+            List of coordinates for active site residues.
+    """
+    parser = PDBParser(QUIET=True)
+    structure = parser.get_structure("protein", pdb_file)
+    atom_list = list(structure.get_atoms())
+    neighbors = NeighborSearch(atom_list)
+
+    copper_ions = [atom.coord for atom in atom_list if atom.element == "CU"]
+    active_site_atoms = []
+
+    for copper in copper_ions:
+        nearby_atoms = neighbors.search(copper, cutoff)
+        for atom in nearby_atoms:
+            active_site_atoms.append(atom.coord)
+
+    return copper_ions, active_site_atoms
+
+def visualize_pdb_3d_box(pdb_file, copper_atoms, protein_atoms, cutoff=5.0):
+    """
+    Visualizes a protein's active site and its copper ion(s) within a normalized 18x18x18 box.
+
+    Parameters
+    ----------
+    pdb_file : str
+        Path to the target PDB file.
+    copper_atoms : list of ndarray
+        List of coordinates for copper atoms.
+    protein_atoms : list of ndarray
+        List of coordinates for active site residues.
+    cutoff : float, optional
+        Defines the active site as residues within a certain distance from the ligand.
+        The distance is measured in angstroms, by default 5.0.
+
+    Returns
+    -------
+    None
+        Displays an interactive 3D visualization of the protein and its active site.
+    """
+    ppdb = PandasPdb().read_pdb(pdb_file)
+    atoms = ppdb.df['ATOM']
+    if atoms.empty:
+        print("Brak danych atomowych w pliku PDB!")
+        return
+
+    if not copper_atoms:
+        print("Brak jonów miedzi w pliku PDB!")
+        return
+    copper_center = copper_atoms[0]
+    
+    protein_atoms = [atom for atom in protein_atoms if 
+                     abs(atom[0] - copper_center[0]) <= cutoff and
+                     abs(atom[1] - copper_center[1]) <= cutoff and
+                     abs(atom[2] - copper_center[2]) <= cutoff]
+
+    x_min, x_max = copper_center[0] - cutoff, copper_center[0] + cutoff
+    y_min, y_max = copper_center[1] - cutoff, copper_center[1] + cutoff
+    z_min, z_max = copper_center[2] - cutoff, copper_center[2] + cutoff
+
+    def normalize(val, v_min, v_max):
+        return (val - v_min) / (v_max - v_min) * 18
+
+    copper_x, copper_y, copper_z = zip(*copper_atoms) if copper_atoms else ([], [], [])
+    protein_x, protein_y, protein_z = zip(*protein_atoms) if protein_atoms else ([], [], [])
+
+    copper_x = [normalize(val, x_min, x_max) for val in copper_x]
+    copper_y = [normalize(val, y_min, y_max) for val in copper_y]
+    copper_z = [normalize(val, z_min, z_max) for val in copper_z]
+
+    protein_x = [normalize(val, x_min, x_max) for val in protein_x]
+    protein_y = [normalize(val, y_min, y_max) for val in protein_y]
+    protein_z = [normalize(val, z_min, z_max) for val in protein_z]
+
+    fig = go.Figure()
+    
+    fig.add_trace(go.Scatter3d(
+        x=protein_x, y=protein_y, z=protein_z,
+        mode='markers',
+        marker=dict(size=3, color='blue'),
+        name='Active Site Atoms'
+    ))
+
+    fig.add_trace(go.Scatter3d(
+        x=copper_x, y=copper_y, z=copper_z,
+        mode='markers',
+        marker=dict(size=8, color='orange'),
+        name='Copper Ions'
+    ))
+
+    fig.update_layout(
+        scene=dict(
+            xaxis=dict(range=[0, 18], showbackground=True, showgrid=True, zeroline=True,
+                       tickmode='array', tickvals=list(range(19))),
+            yaxis=dict(range=[0, 18], showbackground=True, showgrid=True, zeroline=True,
+                       tickmode='array', tickvals=list(range(19))),
+            zaxis=dict(range=[0, 18], showbackground=True, showgrid=True, zeroline=True,
+                       tickmode='array', tickvals=list(range(19))),
+        ),
+        title="Aktywne miejsce białka w pudełku 18x18x18"
+    )
+
+    fig.show()
+
+pdb_file = download_pdb_file("1AAC")
+copper, protein_atoms = extract_active_site(pdb_file, 5.0)
+visualize_pdb_3d_box(pdb_file, copper, protein_atoms, 5.0)
+print("PDB file:", pdb_file)
