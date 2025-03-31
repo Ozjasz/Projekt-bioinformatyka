@@ -1,0 +1,259 @@
+import numpy as np
+import random
+from Bio.PDB import PDBList, PDBParser, NeighborSearch
+import plotly.graph_objects as go
+import plotly.io as pio
+from biopandas.pdb import PandasPdb
+
+# Defining atom types and their corresponding channel numbers
+ATOM_TYPES = {
+    'H': 0, 'C': 1, 'N': 2, 'O': 3, 'F': 4, 'P': 5, 'S': 6, 'Cl': 7, 'K': 8, 'Ca': 9,
+    'Mn': 10, 'Fe': 11, 'Co': 12, 'Ni': 13, 'Cu': 14, 'Zn': 15, 'Se': 16, 'Br': 17, 'I': 18,
+    'Mo': 19, 'W': 20, 'CU2+': 21  
+}
+
+def download_pdb_file(pdb_id):
+    """Downloads pdb file and saves it locally.
+    
+    Parameters
+    ----------
+    id : string
+        PDB id of the target protein.
+
+    Returns
+    -------
+    string
+        Path to the downloaded file.
+    """
+    pdbl = PDBList()
+    pdb_file = pdbl.retrieve_pdb_file(pdb_id, file_format="pdb")
+    return pdb_file
+
+def extract_active_site(pdb_file, cutoff=5.0):
+    """Extracting protein's active site and its ligand (copper ion) from the PDB file.
+
+    Parameters
+    ----------
+    pdb_file : string
+        Path to the target PDB file.
+    cutoff : float, optional
+        Here we define active site as residues within a certain distance
+        from the ligand. The distance is measured in angstroms, by default 5.0.
+
+    Returns
+    -------
+    tuple
+        copper_atoms : list of ndarray
+            List of coordinates for copper atoms.
+        active_site_atoms : list of ndarray
+        
+    """
+    parser = PDBParser(QUIET=True)
+    structure = parser.get_structure("protein", pdb_file)
+    atom_list = list(structure.get_atoms())
+    neighbors = NeighborSearch(atom_list)
+
+    copper_ions = [atom.coord for atom in atom_list if atom.element == "CU"]
+    active_site_atoms = []
+
+    for copper in copper_ions:
+        nearby_atoms = neighbors.search(copper, cutoff)
+        for atom in nearby_atoms:
+            active_site_atoms.append(list(atom.coord))
+
+    return copper_ions, active_site_atoms
+
+def rotate_atoms(atoms, rotation_matrix):
+    """Rotate a set of atoms using the provided rotation matrix.
+
+    Parameters
+    ----------
+    atoms : list of ndarray
+        A list of atomic coordinates, where each atom is represented as a 3-element array-like (x, y, z).
+    rotation_matrix : ndarray
+        A 3x3 rotation matrix used to transform the atomic coordinates.
+
+    Returns
+    -------
+    list of ndarray
+        A list of rotated atomic coordinates.
+    """
+    return [np.dot(rotation_matrix, atom) for atom in atoms]
+
+def rotate_box(protein_atoms, copper_atoms):
+    """Randomly rotate a set of atoms around the X, Y, or Z axis.
+
+    Parameters
+    ----------
+    protein_atoms : list of ndarray
+        A list of atomic coordinates representing the protein atoms.
+    copper_atoms : list of array-like
+        A list of atomic coordinates representing the copper atoms.
+
+    Returns
+    -------
+    tuple of (list of ndarray, list of ndarray)
+        A tuple containing the rotated protein atoms and rotated copper atoms.
+
+    Notes
+    -----
+    If the copper atom moves out of the 18x18x18 box, the rotation is retried until the copper atom stays within bounds.
+    """
+    axes = ['x', 'y', 'z']
+    axis = random.choice(axes)
+    angle_degrees = random.randint(1, 359)
+    angle = np.radians(angle_degrees)
+
+    if axis == 'x':
+        rotation_matrix = np.array([
+            [1, 0, 0],
+            [0, np.cos(angle), -np.sin(angle)],
+            [0, np.sin(angle), np.cos(angle)]
+        ])
+    elif axis == 'y':
+        rotation_matrix = np.array([
+            [np.cos(angle), 0, np.sin(angle)],
+            [0, 1, 0],
+            [-np.sin(angle), 0, np.cos(angle)]
+        ])
+    else:  # Z axis
+        rotation_matrix = np.array([
+            [np.cos(angle), -np.sin(angle), 0],
+            [np.sin(angle), np.cos(angle), 0],
+            [0, 0, 1]
+        ])
+
+    rotated_protein = rotate_atoms(protein_atoms, rotation_matrix)
+    rotated_copper = rotate_atoms(copper_atoms, rotation_matrix)
+
+    copper_center = rotated_copper[0] if rotated_copper else None
+    if copper_center is not None and any(coord < 0 or coord > 18 for coord in copper_center):
+        print("Blad: Jon miedzi jest poza pudelkiem 18x18x18. Ponawiam rotacje...")
+        return rotate_box(protein_atoms, copper_atoms)
+    print(f"Rotacja wokol osi {axis.upper()} o {angle_degrees} stopni")
+    return rotated_protein, rotated_copper
+
+def assign_to_channel(atom, atom_type):
+    """
+    Assigns atoms to one of 22 channels based on their type.
+
+    Parameters
+    ----------
+    atom : tuple
+        Atom coordinates.
+    atom_type : str
+        Atom type.
+
+    Returns
+    -------
+    int
+        Channel number or -1 if the atom type was not found.
+    """
+    return ATOM_TYPES.get(atom_type, -1)
+
+def visualize_pdb_3d_box(pdb_file, copper_atoms, protein_atoms, cutoff=5.0, title=""):
+    """
+    Visualizes atoms in 3D in a box (18x18x18) with 22 channels.
+
+    Parameters
+    ----------
+    pdb_file : str
+        The path to the PDB file.
+    copper_atoms : list
+        List of copper atom coordinates.
+    protein_atoms : list
+        List of protein atom coordinates.
+    cutoff : float, optional
+        Radius in Angstrems for trimming protein atoms around the active center, by default 5.0.
+    title : str
+        Title of the plot.
+
+    Returns
+    -------
+    go.Figure
+        Plotly figure object for the visualization.
+    """
+    ppdb = PandasPdb().read_pdb(pdb_file)
+    atoms = ppdb.df['ATOM']
+    if atoms.empty:
+        print("Brak danych atomowych w pliku PDB!")
+        return
+
+    if not copper_atoms:
+        print("Brak jonów miedzi w pliku PDB!")
+        return
+
+    copper_center = copper_atoms[0]
+
+    protein_atoms = [atom for atom in protein_atoms if
+                     abs(atom[0] - copper_center[0]) <= cutoff and
+                     abs(atom[1] - copper_center[1]) <= cutoff and
+                     abs(atom[2] - copper_center[2]) <= cutoff]
+
+    x_min, x_max = min(copper_center[0], min(protein_atoms, key=lambda x: x[0])[0]) - cutoff, max(copper_center[0], max(protein_atoms, key=lambda x: x[0])[0]) + cutoff
+    y_min, y_max = min(copper_center[1], min(protein_atoms, key=lambda x: x[1])[1]) - cutoff, max(copper_center[1], max(protein_atoms, key=lambda x: x[1])[1]) + cutoff
+    z_min, z_max = min(copper_center[2], min(protein_atoms, key=lambda x: x[2])[2]) - cutoff, max(copper_center[2], max(protein_atoms, key=lambda x: x[2])[2]) + cutoff
+
+    def normalize(val, v_min, v_max):
+        return (val - v_min) / (v_max - v_min) * 18
+
+    copper_x, copper_y, copper_z = zip(*copper_atoms) if copper_atoms else ([], [], [])
+    protein_x, protein_y, protein_z = zip(*protein_atoms) if protein_atoms else ([], [], [])
+
+    copper_x = [round(normalize(val, x_min, x_max), 2) for val in copper_x]
+    copper_y = [round(normalize(val, y_min, y_max), 2) for val in copper_y]
+    copper_z = [round(normalize(val, z_min, z_max), 2) for val in copper_z]
+
+    protein_x = [round(normalize(val, x_min, x_max), 2) for val in protein_x]
+    protein_y = [round(normalize(val, y_min, y_max), 2) for val in protein_y]
+    protein_z = [round(normalize(val, z_min, z_max), 2) for val in protein_z]
+
+    copper_boxes = [assign_to_channel((x, y, z), 'CU2+') for x, y, z in zip(copper_x, copper_y, copper_z)]
+    protein_boxes = [assign_to_channel((x, y, z), atom_type) for (x, y, z), atom_type in zip(zip(protein_x, protein_y, protein_z), atoms['element_symbol'])]
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter3d(
+        x=protein_x, y=protein_y, z=protein_z,
+        mode='markers',
+        marker=dict(size=5, color=protein_boxes, opacity=0.8, colorscale='Jet', symbol='circle'),
+        text=[f"Atom: {atom}, Kanał: {cube}, Koordynaty: ({xi:.2f}, {yi:.2f}, {zi:.2f})"
+              for atom, cube, xi, yi, zi in zip(atoms['atom_name'], protein_boxes, protein_x, protein_y, protein_z)],
+        hoverinfo="text",
+        name='Centrum aktywne'
+    ))
+    fig.add_trace(go.Scatter3d(
+        x=copper_x, y=copper_y, z=copper_z,
+        mode='markers',
+        marker=dict(size=8, color=copper_boxes, opacity=0.8, colorscale='Jet', symbol='circle'),
+        text=[f"Jon miedzi: {atom}, KanaL: {cube}, Koordynaty: ({xi:.2f}, {yi:.2f}, {zi:.2f})"
+              for atom, cube, xi, yi, zi in zip(atoms['atom_name'], copper_boxes, copper_x, copper_y, copper_z)],
+        hoverinfo="text",
+        name='Jon miedzi'
+    ))
+
+    fig.update_layout(
+        scene=dict(
+            xaxis=dict(range=[0, 18], showbackground=True, showgrid=True, zeroline=True, tickmode='array', tickvals=list(range(19)), title='X'),
+            yaxis=dict(range=[0, 18], showbackground=True, showgrid=True, zeroline=True, tickmode='array', tickvals=list(range(19)), title='Y'),
+            zaxis=dict(range=[0, 18], showbackground=True, showgrid=True, zeroline=True, tickmode='array', tickvals=list(range(19)), title='Z'),
+        ),
+        title=title
+    )
+
+    return fig
+
+
+pdb_file = download_pdb_file("1AAC")
+copper, protein_atoms = extract_active_site(pdb_file, 5.0)
+
+fig_before_rotation = visualize_pdb_3d_box(pdb_file, copper, protein_atoms, 5.0, "Visualize before rotation")
+
+rotated_protein, rotated_copper = rotate_box(protein_atoms, copper)
+
+fig_after_rotation = visualize_pdb_3d_box(pdb_file, rotated_copper, rotated_protein, 5.0, "Visualize after rotation")
+
+pio.write_html(fig_before_rotation, file='visualization_before_rotation.html', auto_open=True)
+pio.write_html(fig_after_rotation, file='visualization_after_rotation.html', auto_open=True)
+
+print("PDB file:", pdb_file)
