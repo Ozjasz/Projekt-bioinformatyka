@@ -226,7 +226,7 @@ def visualize_pdb_3d_box(pdb_file, copper_atoms, protein_atoms, cutoff=5.0, titl
         x=copper_x, y=copper_y, z=copper_z,
         mode='markers',
         marker=dict(size=8, color=copper_boxes, opacity=0.8, colorscale='Jet', symbol='circle'),
-        text=[f"Jon miedzi: {atom}, KanaL: {cube}, Koordynaty: ({xi:.2f}, {yi:.2f}, {zi:.2f})"
+        text=[f"Jon miedzi: {atom}, Kanał: {cube}, Koordynaty: ({xi:.2f}, {yi:.2f}, {zi:.2f})"
               for atom, cube, xi, yi, zi in zip(atoms['atom_name'], copper_boxes, copper_x, copper_y, copper_z)],
         hoverinfo="text",
         name='Jon miedzi'
