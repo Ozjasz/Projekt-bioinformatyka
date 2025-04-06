@@ -1,23 +1,13 @@
-import pytest
 import os
-from visualisation import download_pdb #visualisation to nazwa jaka ja sobie dalam jak pisalam z kodu nastki, potem mozna zmienic
+import pytest
+from visualisation import download_pdb #visualisation to kod nastki
 
-# Funkcja testowa z mockowaniem, zeby nie zaśmiecać
-def test_download_pdb(mocker, tmp_path):
-    pdb_id = "1ABC"  #przykladowe pdb id
-    output_file = tmp_path / f"{pdb_id}.pdb" #ma sie to zapisac w tymczasowym folderze
+def test_download_pdb_file(tmp_path):
+    pdb_id = "1GZK"
+    file_path = download_pdb(pdb_id)
 
-    mock_response = mocker.Mock()
-    mock_response.text = "fake pdb" #testuje czy to sie zwraca
-    mocker.patch("requests.get", return_value=mock_response)
+    assert os.path.exists(file_path), f"Nie znaleziono pliku: {file_path}"
 
-    # Zmiana katalogu roboczego na `tmp_path`
-    os.chdir(tmp_path)
-
-    # Wywołanie funkcji
-    result = download_pdb(pdb_id)
-
-    # Sprawdzenie, czy plik istnieje w katalogu `tmp_path`
-    assert result == f"{pdb_id}.pdb"
-    assert output_file.exists()
-    assert output_file.read_text() == "fake pdb"
+    with open(file_path) as f:
+        content = f.read()
+        assert "1GZK" in content.upper(), "Plik nie zawiera ID 1GZK!"
