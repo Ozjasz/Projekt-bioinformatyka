@@ -1,0 +1,31 @@
+import pytest
+import plotly.graph_objects as go
+from biopandas.pdb import PandasPdb
+from pandas import DataFrame
+from visualisation import visualize_pdb_3d_box #tutaj to samo, nazwalam tak plik z kodem nastki u siebie ale mozna zmienic
+
+# Fixture do mockowania obiektu PandasPdb
+@pytest.fixture
+def mock_pdb(mocker):
+    """Mockuje obiekt PandasPdb, zwracając przykładowe dane atomowe."""
+    mock_pdb_instance = mocker.MagicMock() #atrapa obiektu PandasPdb
+    mock_df = DataFrame({
+        'x_coord': [1, 2, 3],
+        'y_coord': [4, 5, 6],
+        'z_coord': [7, 8, 9]
+    }) #przykladowy dataframe z danymi atomowymi
+    mock_pdb_instance.df = {'ATOM': mock_df}
+    return mock_pdb_instance #zwraca atrape
+
+
+# Test funkcji wizualizacji z poprawnymi danymi
+def test_visualize_pdb_3d_box(mocker, mock_pdb):
+    """Sprawdza, czy funkcja generuje wykres dla poprawnych danych."""
+    mocker.patch.object(PandasPdb, "read_pdb", return_value=mock_pdb) 
+    mock_show = mocker.patch.object(go.Figure, "show", return_value=None)
+
+    pdb_file = "mock_pdb_file.pdb"
+    visualize_pdb_3d_box(pdb_file)
+
+    # Sprawdza, czy wykres został wygenerowany
+    mock_show.assert_called_once()
