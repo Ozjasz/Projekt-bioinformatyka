@@ -1,21 +1,11 @@
 import requests
 
 def fetch_pdb_ids():
-   
     """
-    Fetches PDB identifiers for structures containing Cu²⁺ (copper ion) 
-    and meeting resolution criteria (0.5-1.5 Å) from the RCSB PDB database.
-
-    Parameters
-    ----------
-    None
-
-    Returns
-    -------
-    list of str
-        A list of retrieved PDB identifiers.
+    Fetches PDB identifiers for structures containing Cu²⁺ (copper ion), 
+    that contain proteins, and meet resolution criteria (0.5-1.5 Å) 
+    from the RCSB PDB database.
     """
-
 
     search_url = "https://search.rcsb.org/rcsbsearch/v2/query"
 
@@ -30,29 +20,31 @@ def fetch_pdb_ids():
                     "parameters": {
                         "attribute": "rcsb_chem_comp_container_identifiers.comp_id",
                         "operator": "in",
-                        "value": ["CU"]  
+                        "value": ["CU"]
                     }
                 },
                 {
-                    "type": "group",
-                    "logical_operator": "and",
-                    "nodes": [
-                        {
-                            "type": "terminal",
-                            "service": "text",
-                            "parameters": {
-                                "attribute": "rcsb_entry_info.resolution_combined",
-                                "operator": "range",
-                                "value": {
-                                    "from": 0.5,
-                                    "to": 1.5,
-                                    "include_lower": True,
-                                    "include_upper": False
-                                }
-                            }
-                        },
-                        
-                    ]
+                    "type": "terminal",
+                    "service": "text",
+                    "parameters": {
+                        "attribute": "rcsb_entry_info.resolution_combined",
+                        "operator": "range",
+                        "value": {
+                            "from": 0.5,
+                            "to": 1.5,
+                            "include_lower": True,
+                            "include_upper": False
+                        }
+                    }
+                },
+                {
+                    "type": "terminal",
+                    "service": "text",
+                    "parameters": {
+                        "attribute": "entity_poly.rcsb_entity_polymer_type",
+                        "operator": "exact_match",
+                        "value": "Protein"
+                    }
                 }
             ]
         },
@@ -60,23 +52,21 @@ def fetch_pdb_ids():
         "request_options": {
             "paginate": {
                 "start": 0,
-                "rows": 1000  
+                "rows": 1000
             }
         }
     }
 
     response = requests.post(search_url, json=query, headers={"Content-Type": "application/json"})
 
-
     if response.status_code == 200:
         data = response.json()
         pdb_ids = [entry["identifier"] for entry in data["result_set"]]
-        
-        with open("pdb_ids.txt", "w") as f:
+
+        with open("PDB_IDS_NOWE.txt", "w") as f:
             f.write("\n".join(pdb_ids))
 
         print(f"Pobrano {len(pdb_ids)} PDB ID i zapisano do pdb_ids.txt")
-        #print(data)
         return pdb_ids
     else:
         print("Błąd w pobieraniu danych:", response.status_code, response.text)
