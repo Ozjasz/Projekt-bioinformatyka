@@ -2,10 +2,19 @@ import requests
 
 def fetch_pdb_ids():
     """
-    Fetches PDB identifiers for structures containing Cu²⁺ (copper ion), 
-    that contain proteins, and meet resolution criteria (0.5-1.5 Å) 
-    from the RCSB PDB database.
+    Fetches PDB identifiers for protein structures containing Cu²⁺ (copper ion) 
+    and meeting resolution criteria (0.5-1.5 Å) from the RCSB PDB database.
+
+    Parameters
+    ----------
+    None
+
+    Returns
+    -------
+    list of str
+        A list of retrieved PDB identifiers.
     """
+
 
     search_url = "https://search.rcsb.org/rcsbsearch/v2/query"
 
