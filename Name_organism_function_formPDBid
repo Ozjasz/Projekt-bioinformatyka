@@ -1,0 +1,230 @@
+import requests
+import re
+
+def get_uniprot_accession(pdb_id):
+    """
+    Retrieves the UniProt accession number for a given PDB ID.
+
+    Parameters
+    ----------
+    pdb_id : str
+        The PDB identifier.
+
+    Returns
+    -------
+    str or None
+        The UniProt accession number if found, otherwise None.
+    """
+    url = f"https://data.rcsb.org/rest/v1/core/polymer_entity/{pdb_id}/1"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+
+        refs = data.get("rcsb_polymer_entity_container_identifiers", {}) \
+                   .get("reference_sequence_identifiers", [])
+
+        for ref in refs:
+            if ref.get("database_name") == "UniProt":
+                return ref.get("database_accession")
+    except:
+        pass
+    return None
+
+def get_protein_name_from_uniprot(accession):
+    """
+    Retrieves the recommended protein name from UniProt using an accession number.
+
+    Parameters
+    ----------
+    accession : str
+        The UniProt accession number.
+
+    Returns
+    -------
+    str or None
+        The full recommended name of the protein, or None if not found.
+    """
+    url = f"https://rest.uniprot.org/uniprotkb/{accession}.json"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+        return data.get("proteinDescription", {}) \
+                   .get("recommendedName", {}) \
+                   .get("fullName", {}) \
+                   .get("value", None)
+    except:
+        pass
+    return None
+
+def get_function_from_uniprot(accession):
+    """
+    Retrieves the functional description of a protein from UniProt.
+
+    Parameters
+    ----------
+    accession : str
+        The UniProt accession number.
+
+    Returns
+    -------
+    str or None
+        Cleaned functional description text, or None if not found.
+    """
+    url = f"https://rest.uniprot.org/uniprotkb/{accession}.json"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+
+        comments = data.get("comments", [])
+        for comment in comments:
+            if comment.get("commentType") == "FUNCTION":
+                texts = comment.get("texts", [])
+                if texts:
+                    raw_text = texts[0].get("value", "")
+                    cleaned_text = re.sub(r'\(PubMed:[^)]+\)', '', raw_text)
+                    return cleaned_text.strip()
+    except:
+        pass
+    return None
+
+def get_structure_title(pdb_id):
+    """
+    Retrieves the structure title from the RCSB PDB entry.
+
+    Parameters
+    ----------
+    pdb_id : str
+        The PDB identifier.
+
+    Returns
+    -------
+    str or None
+        The structure title, or None if not found.
+    """
+    url = f"https://data.rcsb.org/rest/v1/core/entry/{pdb_id}"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+        return data.get("struct", {}).get("title", None)
+    except:
+        pass
+    return None
+
+def get_protein_data(pdb_ids):
+    """
+    Retrieves protein data (name, organism, description) for a list of PDB IDs.
+
+    Parameters
+    ----------
+    pdb_ids : list of str
+        List of PDB identifiers.
+
+    Returns
+    -------
+    dict
+        Dictionary where each key is a PDB ID and the value is another dict with:
+        - "name": str
+        - "organism": str
+        - "description": str
+    """
+    results = {}
+    for pdb_id in pdb_ids:
+        print(f"Pobieram dane dla {pdb_id}...")
+
+        name = "Brak nazwy"
+        organism = "Nieznany organizm"
+        description = "Brak opisu"
+
+        accession = get_uniprot_accession(pdb_id)
+
+        if accession:
+            protein_name = get_protein_name_from_uniprot(accession)
+            if protein_name:
+                name = protein_name
+            else:
+                title = get_structure_title(pdb_id)
+                if title:
+                    name = f"(z PDB) {title}"
+        else:
+            title = get_structure_title(pdb_id)
+            if title:
+                name = f"(z PDB) {title}"
+
+        try:
+            url_entry = f"https://data.rcsb.org/rest/v1/core/entry/{pdb_id}"
+            response = requests.get(url_entry)
+            response.raise_for_status()
+            entry_data = response.json()
+
+            entities = entry_data.get("rcsb_entry_container_identifiers", {}).get("polymer_entity_ids", [])
+            if entities:
+                entity_id = entities[0]
+                url_entity = f"https://data.rcsb.org/rest/v1/core/polymer_entity/{pdb_id}/{entity_id}"
+                entity_response = requests.get(url_entity)
+                entity_response.raise_for_status()
+                entity_data = entity_response.json()
+                sources = entity_data.get("rcsb_entity_source_organism", [])
+                if sources:
+                    organism = sources[0].get("scientific_name", organism)
+        except Exception as e:
+            print(f"⚠ Błąd przy pobieraniu organizmu dla {pdb_id}: {e}")
+
+        if accession:
+            func = get_function_from_uniprot(accession)
+            if func:
+                description = func
+            else:
+                description = get_structure_title(pdb_id) or description
+        else:
+            description = get_structure_title(pdb_id) or description
+
+        results[pdb_id] = {
+            "name": name,
+            "organism": organism,
+            "description": description
+        }
+
+    return results
+
+def save_protein_data(results, filename):
+    """
+    Saves the protein data dictionary to a text file.
+
+    Parameters
+    ----------
+    results : dict
+        Dictionary of protein data structured by PDB ID.
+    filename : str
+        Path to the file where the data will be saved.
+
+    Returns
+    -------
+    None
+    """
+    with open(filename, "w", encoding="utf-8") as f:
+        for pdb_id, data in results.items():
+            f.write(f"{pdb_id}:\n")
+            f.write(f"  Nazwa: {data['name']}\n")
+            f.write(f"  Organizm: {data['organism']}\n")
+            f.write(f"  Opis/Funkcja: {data['description']}\n\n")
+
+def load_pdb_ids_from_file(filename):
+    """
+    Loads PDB IDs from a text file.
+
+    Parameters
+    ----------
+    filename : str
+        Path to the file containing one PDB ID per line.
+
+    Returns
+    -------
+    list of str
+        List of  PDB IDs.
+    """
+    with open(filename, "r") as f:
+        return [line.strip().upper() for line in f if line.strip()]
