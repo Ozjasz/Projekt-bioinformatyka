@@ -60,7 +60,7 @@ def get_protein_name_from_uniprot(accession):
 
 def get_function_from_uniprot(accession):
     """
-    Retrieves the functional description of a protein from UniProt.
+    Retrieves a functional description of a protein from UniProt.
 
     Parameters
     ----------
@@ -70,13 +70,18 @@ def get_function_from_uniprot(accession):
     Returns
     -------
     str or None
-        Cleaned functional description text, or None if not found.
+        Combined functional description text, or None if not found.
     """
     url = f"https://rest.uniprot.org/uniprotkb/{accession}.json"
     try:
         response = requests.get(url)
         response.raise_for_status()
         data = response.json()
+
+        descriptions = []
+        has_function = False
+        cofactor_names = set()
+        feature_descriptions = set()
 
         comments = data.get("comments", [])
         for comment in comments:
@@ -85,10 +90,47 @@ def get_function_from_uniprot(accession):
                 if texts:
                     raw_text = texts[0].get("value", "")
                     cleaned_text = re.sub(r'\(PubMed:[^)]+\)', '', raw_text)
-                    return cleaned_text.strip()
-    except:
-        pass
+                    descriptions.append(cleaned_text.strip())
+                    has_function = True
+
+            if comment.get("commentType") == "COFACTOR":
+                cofactors = comment.get("cofactors", [])
+                for cofactor in cofactors:
+                    name = cofactor.get("name")
+                    if name:
+                        cofactor_names.add(name)
+
+        if cofactor_names:
+            cofactor_line = "Protein has cofactor binding site for: " + ", ".join(sorted(cofactor_names))
+            descriptions.append(cofactor_line)
+
+        features = data.get("features", [])
+        for feature in features:
+            if feature.get("type") in {"Domain", "Region", "Motif"}:
+                desc = feature.get("description")
+                if desc:
+                    feature_descriptions.add(f"Feature: {desc}")
+
+        submission_names = data.get("proteinDescription", {}).get("submissionNames", [])
+        for name_entry in submission_names:
+            full_name = name_entry.get("fullName", {}).get("value")
+            if full_name:
+                descriptions.append(full_name)
+
+        descriptions.extend(sorted(feature_descriptions))
+
+        if not has_function:
+            descriptions.insert(0, "The general function is not described in UniProt.")
+
+        if descriptions:
+            return " | ".join(descriptions)
+
+    except Exception as e:
+        print(f"⚠ Błąd przy pobieraniu funkcji z UniProt dla {accession}: {e}")
+
     return None
+
+
 
 def get_structure_title(pdb_id):
     """
@@ -131,6 +173,9 @@ def get_protein_data(pdb_ids):
         - "organism": str
         - "description": str
     """
+    zUniProt = []
+    zPDB = []
+
     results = {}
     for pdb_id in pdb_ids:
         print(f"Pobieram dane dla {pdb_id}...")
@@ -177,10 +222,13 @@ def get_protein_data(pdb_ids):
             func = get_function_from_uniprot(accession)
             if func:
                 description = func
+                zUniProt.append(pdb_id)
             else:
                 description = get_structure_title(pdb_id) or description
+                zPDB.append(pdb_id)
         else:
             description = get_structure_title(pdb_id) or description
+            zPDB.append(pdb_id)
 
         results[pdb_id] = {
             "name": name,
@@ -188,7 +236,7 @@ def get_protein_data(pdb_ids):
             "description": description
         }
 
-    return results
+    return results, zPDB, zUniProt
 
 def save_protein_data(results, filename):
     """
@@ -208,9 +256,9 @@ def save_protein_data(results, filename):
     with open(filename, "w", encoding="utf-8") as f:
         for pdb_id, data in results.items():
             f.write(f"{pdb_id}:\n")
-            f.write(f"  Nazwa: {data['name']}\n")
-            f.write(f"  Organizm: {data['organism']}\n")
-            f.write(f"  Opis/Funkcja: {data['description']}\n\n")
+            f.write(f"  Name: {data['name']}\n")
+            f.write(f"  Organism: {data['organism']}\n")
+            f.write(f"  Function/Info: {data['description']}\n\n")
 
 def load_pdb_ids_from_file(filename):
     """
@@ -228,3 +276,14 @@ def load_pdb_ids_from_file(filename):
     """
     with open(filename, "r") as f:
         return [line.strip().upper() for line in f if line.strip()]
+    
+pdb_ids = load_pdb_ids_from_file("best_group.txt")
+results, zPDB, zUniProt = get_protein_data(pdb_ids)
+
+results["2VOV"]["name"] = "MopE"
+results["5NFM"]["name"] = "YrbA"
+results["5Z0K"]["name"] = "Copper-bound tyrosinanse in complex with the caddie protein"
+results["7OKR"]["name"] = "Catalytic domain from lytic polysaccharide monooxygenase"
+
+
+save_protein_data(results, "protein_full_info.txt")
