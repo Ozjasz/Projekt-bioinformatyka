@@ -55,10 +55,7 @@ def get_protein_name_from_uniprot(accession, translate=False):
         response = requests.get(url)
         response.raise_for_status()
         data = response.json()
-        name = data.get("proteinDescription", {}) \
-                   .get("recommendedName", {}) \
-                   .get("fullName", {}) \
-                   .get("value", None)
+        name = data.get("proteinDescription", {}).get("recommendedName", {}).get("fullName", {}).get("value", None)
         if translate and name:
             try:
                 name = GoogleTranslator(source='en', target='pl').translate(name)
@@ -205,7 +202,6 @@ with st.sidebar:
     color_option = st.selectbox("Schemat kolorów", ["spectrum", "chain", "residue"])
     show_ligands = st.checkbox("Pokaż ligandy", value=True)
 
-# 3-literowe na 1-literowe aminokwasy
 three_to_one = {
     'ALA': 'A', 'ARG': 'R', 'ASN': 'N', 'ASP': 'D',
     'CYS': 'C', 'GLN': 'Q', 'GLU': 'E', 'GLY': 'G',
@@ -234,7 +230,8 @@ def fetch_pdb(pdb_id):
         st.error(f"Nie udało się pobrać danych dla ID: {pdb_id}")
         return None
 
-def show_pdb(pdb_string, style="cartoon", color="spectrum", ligands=True):
+def show_pdb(pdb_string, ligands=None, highlight_ligand=None,
+             style="cartoon", color="spectrum", show_ligands=True):
     """
     Generates a 3D visualization of a protein structure from a PDB file.
     
@@ -249,26 +246,27 @@ def show_pdb(pdb_string, style="cartoon", color="spectrum", ligands=True):
     """
     view = py3Dmol.view(width=800, height=600)
     view.addModel(pdb_string, "pdb")
-    view.setStyle({style: {"color": color}})
 
-    if ligands:
-        site_lines = [line for line in pdb_string.splitlines() if line.startswith("REMARK 800 SITE_DESCRIPTION")]
-        
-        binding_residues = []
-        pattern = re.compile(r'REMARK 800 SITE_DESCRIPTION: BINDING SITE FOR RESIDUE (\w{1,3}) (\w) (\d+)')
-        for line in site_lines:
-            match = pattern.search(line)
-            if match:
-                resn, chain, resi = match.groups()
-                binding_residues.append({'resn': resn, 'chain': chain, 'resi': int(resi)})
+    # Ustaw styl i kolor głównej struktury
+    if style == "cartoon":
+        view.setStyle({"cartoon": {"color": color}})
+    elif style == "stick":
+        view.setStyle({"stick": {"colorscheme": color}})
+    elif style == "surface":
+        view.setStyle({"surface": {"colorscheme": color}})
+    else:
+        # Domyślnie cartoon z spectrum, jeśli nieznany styl
+        view.setStyle({"cartoon": {"color": "spectrum"}})
 
-        resn_colors = {}
-        predefined_colors = [
-            'red', 'blue', 'green', 'orange', 'purple', 'cyan', 'magenta', 'yellow', 'pink', 'brown'
-        ]
-        color_index = 0
+    resn_colors = {}
+    predefined_colors = [
+        'orange', 'blue', 'green', 'purple', 'cyan', 'magenta', 'yellow', 'pink', 'brown'
+    ]
+    color_index = 0
 
-        for residue in binding_residues:
+    # Jeśli pokazujemy ligandy i mamy ich listę, rysujemy kule i etykiety ligandów
+    if show_ligands and ligands:
+        for residue in ligands:
             resn = residue['resn']
             if resn not in resn_colors:
                 if color_index < len(predefined_colors):
@@ -277,18 +275,18 @@ def show_pdb(pdb_string, style="cartoon", color="spectrum", ligands=True):
                 else:
                     resn_colors[resn] = "#{:06x}".format(random.randint(0, 0xFFFFFF))
 
-        for residue in binding_residues:
+        for residue in ligands:
             selection = {
                 'hetflag': True,
                 'resn': residue['resn'],
                 'chain': residue['chain'],
                 'resi': residue['resi']
             }
-            color = resn_colors[residue['resn']]
-            view.addStyle(selection, {"sphere": {"radius": 2.0, "color": color}})
+            color_lig = resn_colors[residue['resn']]
+            view.addStyle(selection, {"sphere": {"radius": 1.5, "color": color_lig, "alpha": 0.8}})
             view.addResLabels(selection, {
                 "font": "Arial",
-                "fontSize": 10,
+                "fontSize": 12,
                 "fontColor": "black",
                 "showBackground": True,
                 "backgroundColor": "white",
@@ -296,11 +294,62 @@ def show_pdb(pdb_string, style="cartoon", color="spectrum", ligands=True):
                 "alignment": "center"
             })
 
-        unique_ligands = set(resn_colors.keys())
-        print("Ligandy w strukturze:", unique_ligands)
+    # Podświetlenie wybranego ligandu (np. po kliknięciu)
+    if highlight_ligand:
+        sel = {
+            'hetflag': True,
+            'resn': highlight_ligand['resn'],
+            'chain': highlight_ligand['chain'],
+            'resi': highlight_ligand['resi']
+        }
+        view.addStyle(sel, {"sphere": {"radius": 2.0, "color": "red", "alpha": 1.0}})
+        view.addResLabels(sel, {
+            "font": "Arial",
+            "fontSize": 14,
+            "fontColor": "red",
+            "showBackground": True,
+            "backgroundColor": "white",
+            "backgroundOpacity": 0.9,
+            "alignment": "center"
+        })
 
-    view.zoomTo()
+        # Pokazujemy atomy w promieniu 5 Å od ligandowych atomów
+        parser = PDBParser(QUIET=True)
+        structure = parser.get_structure("structure", StringIO(pdb_string))
+        model = next(structure.get_models())
+        atoms = list(model.get_atoms())
+
+        ligand_atoms = []
+        for atom in atoms:
+            res = atom.get_parent()
+            if (res.id[0] != " ") and (res.resname == highlight_ligand['resn']) and \
+               (res.parent.id == highlight_ligand['chain']) and (res.id[1] == highlight_ligand['resi']):
+                ligand_atoms.append(atom)
+
+        from Bio.PDB import NeighborSearch
+        ns = NeighborSearch(atoms)
+        close_atoms = set()
+        for latom in ligand_atoms:
+            nearby = ns.search(latom.coord, 5.0)
+            close_atoms.update(nearby)
+
+        for atom in close_atoms:
+            res = atom.get_parent()
+            if res.resname != highlight_ligand['resn'] or res.parent.id != highlight_ligand['chain'] or res.id[1] != highlight_ligand['resi']:
+                sel_atom = {
+                    'chain': res.parent.id,
+                    'resi': res.id[1],
+                    'atom': atom.get_name()
+                }
+                view.addStyle(sel_atom, {"sphere": {"radius": 1.2, "color": "blue", "alpha": 0.6}})
+
+        view.zoomTo(sel)
+    else:
+        view.zoomTo()
+
     return view
+
+
 
 def extract_sequence(pdb_string):
     """
@@ -327,7 +376,6 @@ def extract_sequence(pdb_string):
             seqs[chain_id] = seq
     return seqs
 
-# Wyświetlanie
 pdb_data = fetch_pdb(pdb_id)
 if pdb_data:
     col1, col2 = st.columns([1, 2])
@@ -342,7 +390,6 @@ if pdb_data:
 
         st.code(pdb_data[:300] + "\n...")
 
-        # Informacje o białku
         name = None
         if accession:
             name = get_protein_name_from_uniprot(accession, translate=True)
@@ -370,7 +417,6 @@ if pdb_data:
         else:
             st.markdown("Brak dostępnego opisu.")
 
-        # Sekwencja
         st.subheader("📄 Sekwencja aminokwasowa")
         sequences = extract_sequence(pdb_data)
         if sequences:
@@ -380,5 +426,96 @@ if pdb_data:
             st.write("Brak dostępnej sekwencji do wyświetlenia.")
 
     with col2:
-        view = show_pdb(pdb_data, style_option, color_option, show_ligands)
+        # === Wyciągnij dostępne ligandy z pliku PDB ===
+                # === Zidentyfikuj wszystkie ligandy z dokładną lokalizacją ===
+        parser = PDBParser(QUIET=True)
+        structure = parser.get_structure("ligand_model", StringIO(pdb_data))
+        ligands_full = []
+
+        for model in structure:
+            for chain in model:
+                for residue in chain:
+                    if residue.id[0] != " " and residue.resname not in ("HOH", "DOD", "WAT"):
+                        ligands_full.append({
+                            "resn": residue.resname,
+                            "chain": chain.id,
+                            "resi": residue.id[1]
+                        })
+
+        ligand_options = [f"{lig['resn']} {lig['chain']} {lig['resi']}" for lig in ligands_full]
+        selected_ligand_label = st.selectbox("🔎 Wybierz ligand do przybliżenia:", ["Cała struktura"] + ligand_options)
+
+        
+        # === Stwórz wizualizację struktury ===
+        view = py3Dmol.view(width=800, height=600)
+        view.addModel(pdb_data, "pdb")
+
+        if selected_ligand_label != "Cała struktura":
+            resn, chain, resi = selected_ligand_label.split()
+            resi = int(resi)
+            view.setStyle({style_option: {"color": color_option}})
+            selection = {"resn": resn, "chain": chain, "resi": resi, "hetflag": True}
+            view.addStyle(selection, {"stick": {"colorscheme": "greenCarbon"}, "sphere": {"radius": 2.0, "color": "lime"}})
+            view.addResLabels(selection, {
+                "font": "Arial",
+                "fontSize": 14,
+                "fontColor": "black",
+                "showBackground": True,
+                "backgroundColor": "white",
+                "backgroundOpacity": 0.6,
+                "alignment": "center"
+            })
+            view.zoomTo(selection)
+
+        else:
+            # Cała struktura
+            view.setStyle({style_option: {"color": color_option}})
+            if show_ligands:
+                site_lines = [line for line in pdb_data.splitlines() if line.startswith("REMARK 800 SITE_DESCRIPTION")]
+                
+                binding_residues = []
+                pattern = re.compile(r'REMARK 800 SITE_DESCRIPTION: BINDING SITE FOR RESIDUE (\w{1,3}) (\w) (\d+)')
+                for line in site_lines:
+                    match = pattern.search(line)
+                    if match:
+                        resn, chain, resi = match.groups()
+                        binding_residues.append({'resn': resn, 'chain': chain, 'resi': int(resi)})
+
+                resn_colors = {}
+                predefined_colors = [
+                     'cyan', 'magenta','green', 'orange', 'purple', 'yellow', 'pink', 'brown,' 'red', 'blue'
+                ]
+                color_index = 0
+
+                for residue in binding_residues:
+                    resn = residue['resn']
+                    if resn not in resn_colors:
+                        if color_index < len(predefined_colors):
+                            resn_colors[resn] = predefined_colors[color_index]
+                            color_index += 1
+                        else:
+                            resn_colors[resn] = "#{:06x}".format(random.randint(0, 0xFFFFFF))
+
+                for residue in binding_residues:
+                    selection = {
+                        'hetflag': True,
+                        'resn': residue['resn'],
+                        'chain': residue['chain'],
+                        'resi': residue['resi']
+                    }
+                    color = resn_colors[residue['resn']]
+                    view.addStyle(selection, {"sphere": {"radius": 2.0, "color": color}})
+                    view.addResLabels(selection, {
+                        "font": "Arial",
+                        "fontSize": 10,
+                        "fontColor": "black",
+                        "showBackground": True,
+                        "backgroundColor": "white",
+                        "backgroundOpacity": 0.8,
+                        "alignment": "center"
+                    })
+
+            view.zoomTo()
+
         st.components.v1.html(view._make_html(), height=600, width=800)
+
