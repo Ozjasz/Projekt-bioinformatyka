@@ -193,7 +193,7 @@ def get_organism_from_pdb(pdb_id):
 st.set_page_config(page_title="Przeglądarka struktury białka 3D", layout="wide")
 st.title("🧬 Wizualizacja struktury białka 3D")
 
-pdb_id = st.text_input("Wprowadź ID PDB (np. 1CRN, 6LU7):", "5AKR").upper()
+pdb_id = st.text_input("Wprowadź ID PDB (np. 1CRN, 6LU7):", "1KYZ").upper()
 
 # Ustawienia w sidebarze
 with st.sidebar:
