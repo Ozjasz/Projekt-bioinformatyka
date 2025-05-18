@@ -1,0 +1,384 @@
+import requests
+import re
+from io import StringIO
+from Bio.PDB import PDBParser
+import py3Dmol
+import streamlit as st
+from deep_translator import GoogleTranslator
+import random
+
+# ---------------------- UniProt & PDB info helpers ---------------------- #
+
+def get_uniprot_accession(pdb_id):
+    """
+    Retrieves the UniProt accession number for a given PDB ID.
+
+    Parameters
+    ----------
+    pdb_id : str
+        The PDB identifier.
+
+    Returns
+    -------
+    str or None
+        The UniProt accession number if found, otherwise None.
+    """
+    url = f"https://data.rcsb.org/rest/v1/core/polymer_entity/{pdb_id}/1"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+        refs = data.get("rcsb_polymer_entity_container_identifiers", {}).get("reference_sequence_identifiers", [])
+        for ref in refs:
+            if ref.get("database_name") == "UniProt":
+                return ref.get("database_accession")
+    except:
+        pass
+    return None
+
+def get_protein_name_from_uniprot(accession, translate=False):
+    """
+    Retrieves the recommended protein name from UniProt using an accession number.
+
+    Parameters
+    ----------
+    accession : str
+        The UniProt accession number.
+
+    Returns
+    -------
+    str or None
+        The full recommended name of the protein, or None if not found.
+    """
+    url = f"https://rest.uniprot.org/uniprotkb/{accession}.json"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+        name = data.get("proteinDescription", {}) \
+                   .get("recommendedName", {}) \
+                   .get("fullName", {}) \
+                   .get("value", None)
+        if translate and name:
+            try:
+                name = GoogleTranslator(source='en', target='pl').translate(name)
+            except Exception as e:
+                print(f"Tłumaczenie nazwy białka nie powiodło się: {e}")
+        return name
+    except:
+        pass
+    return None
+
+def get_function_from_uniprot(accession, translate=False):
+    """
+    Retrieves a functional description of a protein from UniProt.
+
+    Parameters
+    ----------
+    accession : str
+        The UniProt accession number.
+
+    Returns
+    -------
+    str or None
+        Combined functional description text, or None if not found.
+    """
+    url = f"https://rest.uniprot.org/uniprotkb/{accession}.json"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+
+        descriptions = []
+        has_function = False
+        cofactor_names = set()
+        feature_descriptions = set()
+
+        for comment in data.get("comments", []):
+            if comment.get("commentType") == "FUNCTION":
+                texts = comment.get("texts", [])
+                if texts:
+                    raw_text = texts[0].get("value", "")
+                    cleaned_text = re.sub(r'\(PubMed:[^)]+\)', '', raw_text)
+                    descriptions.append(cleaned_text.strip())
+                    has_function = True
+            if comment.get("commentType") == "COFACTOR":
+                cofactors = comment.get("cofactors", [])
+                for cofactor in cofactors:
+                    name = cofactor.get("name")
+                    if name:
+                        cofactor_names.add(name)
+
+        if cofactor_names:
+            descriptions.append("Białko posiada miejsce wiązania kofaktora: " + ", ".join(sorted(cofactor_names)))
+
+        for feature in data.get("features", []):
+            if feature.get("type") in {"Domain", "Region", "Motif"}:
+                desc = feature.get("description")
+                if desc:
+                    feature_descriptions.add(f"Cechy: {desc}")
+
+        descriptions.extend(sorted(feature_descriptions))
+
+        if not has_function:
+            descriptions.insert(0, "Ogólna funkcja nie została opisana w UniProt.")
+
+        full_description = "\n".join(descriptions) if descriptions else None
+        if translate and full_description:
+            try:
+                full_description = GoogleTranslator(source='en', target='pl').translate(full_description)
+            except Exception as e:
+                print(f"Tłumaczenie opisu funkcji nie powiodło się: {e}")
+
+        return full_description
+
+    except:
+        return None
+
+def get_structure_title(pdb_id):
+    """
+    Retrieves the structure title from the RCSB PDB entry.
+
+    Parameters
+    ----------
+    pdb_id : str
+        The PDB identifier.
+
+    Returns
+    -------
+    str or None
+        The structure title, or None if not found.
+    """
+    url = f"https://data.rcsb.org/rest/v1/core/entry/{pdb_id}"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+        return data.get("struct", {}).get("title", None)
+    except:
+        return None
+
+def get_organism_from_pdb(pdb_id):
+    """
+    Retrieves the organism name from which the protein originates, based on PDB ID.
+
+    Parameters
+    ----------
+    pdb_id : str
+        Protein Data Bank identifier.
+
+    Returns
+    -------
+    str
+        Scientific name of the organism or "Unknown" if unavailable.
+    """
+    try:
+        url_entry = f"https://data.rcsb.org/rest/v1/core/entry/{pdb_id}"
+        response = requests.get(url_entry)
+        response.raise_for_status()
+        entry_data = response.json()
+        entities = entry_data.get("rcsb_entry_container_identifiers", {}).get("polymer_entity_ids", [])
+        if entities:
+            entity_id = entities[0]
+            url_entity = f"https://data.rcsb.org/rest/v1/core/polymer_entity/{pdb_id}/{entity_id}"
+            entity_response = requests.get(url_entity)
+            entity_response.raise_for_status()
+            entity_data = entity_response.json()
+            sources = entity_data.get("rcsb_entity_source_organism", [])
+            if sources:
+                return sources[0].get("scientific_name", "Nieznany")
+    except:
+        pass
+    return "Nieznany"
+
+# ---------------------- Streamlit App ---------------------- #
+
+st.set_page_config(page_title="Przeglądarka struktury białka 3D", layout="wide")
+st.title("🧬 Wizualizacja struktury białka 3D")
+
+pdb_id = st.text_input("Wprowadź ID PDB (np. 1CRN, 6LU7):", "5AKR").upper()
+
+# Ustawienia w sidebarze
+with st.sidebar:
+    st.header("⚙️ Ustawienia wizualizacji")
+    style_option = st.selectbox("Styl wizualizacji", ["cartoon", "stick", "surface"])
+    color_option = st.selectbox("Schemat kolorów", ["spectrum", "chain", "residue"])
+    show_ligands = st.checkbox("Pokaż ligandy", value=True)
+
+# 3-literowe na 1-literowe aminokwasy
+three_to_one = {
+    'ALA': 'A', 'ARG': 'R', 'ASN': 'N', 'ASP': 'D',
+    'CYS': 'C', 'GLN': 'Q', 'GLU': 'E', 'GLY': 'G',
+    'HIS': 'H', 'ILE': 'I', 'LEU': 'L', 'LYS': 'K',
+    'MET': 'M', 'PHE': 'F', 'PRO': 'P', 'SER': 'S',
+    'THR': 'T', 'TRP': 'W', 'TYR': 'Y', 'VAL': 'V',
+    'SEC': 'U', 'PYL': 'O'
+}
+
+def fetch_pdb(pdb_id):
+    """
+    Fetches a PDB file from the RCSB PDB database using the PDB ID.
+    
+    Args:
+        pdb_id (str): Protein PDB identifier.
+        
+    Returns:
+        str: The PDB file content as text.
+        None: If fetching failed.
+    """
+    url = f"https://files.rcsb.org/download/{pdb_id}.pdb"
+    response = requests.get(url)
+    if response.status_code == 200:
+        return response.text
+    else:
+        st.error(f"Nie udało się pobrać danych dla ID: {pdb_id}")
+        return None
+
+def show_pdb(pdb_string, style="cartoon", color="spectrum", ligands=True):
+    """
+    Generates a 3D visualization of a protein structure from a PDB file.
+    
+    Args:
+        pdb_string (str): Text representation of the PDB structure.
+        style (str): Visualization style ("cartoon", "stick", "surface").
+        color (str): Color scheme for the structure ("spectrum", "chain", "residue").
+        ligands (bool): Flag to display ligands.
+        
+    Returns:
+        view: A py3Dmol object containing the visualization.
+    """
+    view = py3Dmol.view(width=800, height=600)
+    view.addModel(pdb_string, "pdb")
+    view.setStyle({style: {"color": color}})
+
+    if ligands:
+        site_lines = [line for line in pdb_string.splitlines() if line.startswith("REMARK 800 SITE_DESCRIPTION")]
+        
+        binding_residues = []
+        pattern = re.compile(r'REMARK 800 SITE_DESCRIPTION: BINDING SITE FOR RESIDUE (\w{1,3}) (\w) (\d+)')
+        for line in site_lines:
+            match = pattern.search(line)
+            if match:
+                resn, chain, resi = match.groups()
+                binding_residues.append({'resn': resn, 'chain': chain, 'resi': int(resi)})
+
+        resn_colors = {}
+        predefined_colors = [
+            'red', 'blue', 'green', 'orange', 'purple', 'cyan', 'magenta', 'yellow', 'pink', 'brown'
+        ]
+        color_index = 0
+
+        for residue in binding_residues:
+            resn = residue['resn']
+            if resn not in resn_colors:
+                if color_index < len(predefined_colors):
+                    resn_colors[resn] = predefined_colors[color_index]
+                    color_index += 1
+                else:
+                    resn_colors[resn] = "#{:06x}".format(random.randint(0, 0xFFFFFF))
+
+        for residue in binding_residues:
+            selection = {
+                'hetflag': True,
+                'resn': residue['resn'],
+                'chain': residue['chain'],
+                'resi': residue['resi']
+            }
+            color = resn_colors[residue['resn']]
+            view.addStyle(selection, {"sphere": {"radius": 2.0, "color": color}})
+            view.addResLabels(selection, {
+                "font": "Arial",
+                "fontSize": 10,
+                "fontColor": "black",
+                "showBackground": True,
+                "backgroundColor": "white",
+                "backgroundOpacity": 0.8,
+                "alignment": "center"
+            })
+
+        unique_ligands = set(resn_colors.keys())
+        print("Ligandy w strukturze:", unique_ligands)
+
+    view.zoomTo()
+    return view
+
+def extract_sequence(pdb_string):
+    """
+    Extracts the amino acid sequence from a PDB file.
+    
+    Args:
+        pdb_string (str): Text representation of the PDB structure.
+        
+    Returns:
+        dict: A dictionary containing sequences for each protein chain.
+    """
+    parser = PDBParser(QUIET=True)
+    structure = parser.get_structure("model", StringIO(pdb_string))
+    seqs = {}
+    for model in structure:
+        for chain in model:
+            chain_id = chain.id
+            seq = ""
+            for res in chain:
+                if res.id[0] == " ":
+                    resname = res.resname
+                    one_letter = three_to_one.get(resname, "X")
+                    seq += one_letter
+            seqs[chain_id] = seq
+    return seqs
+
+# Wyświetlanie
+pdb_data = fetch_pdb(pdb_id)
+if pdb_data:
+    col1, col2 = st.columns([1, 2])
+
+    with col1:
+        st.subheader(f"🔬 Struktura: {pdb_id}")
+        st.markdown(f"[🔗 Zobacz na RCSB PDB](https://www.rcsb.org/structure/{pdb_id})")
+
+        accession = get_uniprot_accession(pdb_id)
+        if accession:
+            st.markdown(f"[🔗 Zobacz na UniProt](https://www.uniprot.org/uniprotkb/{accession})")
+
+        st.code(pdb_data[:300] + "\n...")
+
+        # Informacje o białku
+        name = None
+        if accession:
+            name = get_protein_name_from_uniprot(accession, translate=True)
+
+        if not name:
+            title = get_structure_title(pdb_id)
+            if title:
+                try:
+                    name = GoogleTranslator(source='en', target='pl').translate(title)
+                except Exception as e:
+                    print(f"Tłumaczenie tytułu struktury nie powiodło się: {e}")
+                    name = title
+            else:
+                name = "Brak nazwy"
+
+        organism = get_organism_from_pdb(pdb_id)
+        description = get_function_from_uniprot(accession, translate=True) if accession else get_structure_title(pdb_id) or "Brak opisu"
+
+        st.markdown(f"**Nazwa:** {name}")
+        st.markdown(f"**Organizm:** {organism}")
+        st.markdown("**Funkcja/Informacje:**")
+        if description:
+            for line in description.split("\n"):
+                st.markdown(f"- {line}")
+        else:
+            st.markdown("Brak dostępnego opisu.")
+
+        # Sekwencja
+        st.subheader("📄 Sekwencja aminokwasowa")
+        sequences = extract_sequence(pdb_data)
+        if sequences:
+            for chain_id, seq in sequences.items():
+                st.text_area(f"Łańcuch {chain_id}", value=seq, height=150)
+        else:
+            st.write("Brak dostępnej sekwencji do wyświetlenia.")
+
+    with col2:
+        view = show_pdb(pdb_data, style_option, color_option, show_ligands)
+        st.components.v1.html(view._make_html(), height=600, width=800)
