@@ -188,12 +188,31 @@ def get_organism_from_pdb(pdb_id):
         pass
     return "Nieznany"
 
+def get_fasta_from_uniprot(accession):
+    """
+    Pobiera sekwencję FASTA białka z UniProt na podstawie accession.
+
+    Args:
+        accession (str): UniProt accession number.
+
+    Returns:
+        str or None: Sekwencja FASTA w formacie tekstowym lub None jeśli nie udało się pobrać.
+    """
+    url = f"https://rest.uniprot.org/uniprotkb/{accession}.fasta"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        return response.text
+    except Exception as e:
+        st.error(f"Nie udało się pobrać sekwencji FASTA: {e}")
+        return None
+
 # ---------------------- Streamlit App ---------------------- #
 
 st.set_page_config(page_title="Przeglądarka struktury białka 3D", layout="wide")
 st.title("🧬 Wizualizacja struktury białka 3D")
 
-pdb_id = st.text_input("Wprowadź ID PDB (np. 1CRN, 6LU7):", "1KYZ").upper()
+pdb_id = st.text_input("Wprowadź ID PDB (np. 2FOS, 6LU7):", "2FOS").upper()
 
 # Ustawienia w sidebarze
 with st.sidebar:
@@ -424,6 +443,18 @@ if pdb_data:
                 st.text_area(f"Łańcuch {chain_id}", value=seq, height=150)
         else:
             st.write("Brak dostępnej sekwencji do wyświetlenia.")
+        
+        if accession:
+            fasta_seq = get_fasta_from_uniprot(accession)
+            if fasta_seq:
+                st.download_button(
+                    label="📥 Pobierz plik FASTA",
+                    data=fasta_seq,
+                    file_name=f"{accession}.fasta",
+                    mime="text/plain"
+                )
+
+
 
     with col2:
         # === Wyciągnij dostępne ligandy z pliku PDB ===
@@ -518,4 +549,3 @@ if pdb_data:
             view.zoomTo()
 
         st.components.v1.html(view._make_html(), height=600, width=800)
-
