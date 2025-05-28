@@ -1,0 +1,269 @@
+import streamlit as st
+import py3Dmol
+import requests
+from Bio.PDB import PDBParser
+from io import StringIO
+from collections import Counter
+
+st.set_page_config(page_title="3D Protein Viewer", layout="wide")
+st.title("🧬 3D Protein Structure Visualization")
+
+THREE_TO_ONE = {
+    'ALA': 'A', 'ARG': 'R', 'ASN': 'N', 'ASP': 'D', 'CYS': 'C',
+    'GLN': 'Q', 'GLU': 'E', 'GLY': 'G', 'HIS': 'H', 'ILE': 'I',
+    'LEU': 'L', 'LYS': 'K', 'MET': 'M', 'PHE': 'F', 'PRO': 'P',
+    'SER': 'S', 'THR': 'T', 'TRP': 'W', 'TYR': 'Y', 'VAL': 'V'
+}
+
+
+def fetch_pdb(pdb_id):
+    url = f"https://files.rcsb.org/download/{pdb_id}.pdb"
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        return response.text
+    except Exception as e:
+        st.error(f"Failed to fetch PDB {pdb_id}: {str(e)}")
+        return None
+
+
+def extract_metadata(pdb_string):
+    metadata = {
+        'title': '', 'resolution': 'N/A', 'organism': 'N/A', 'experiment': 'N/A',
+        'classification': 'N/A', 'keywords': 'N/A', 'composition': {},
+        'chains': set(), 'residues': 0, 'atoms': 0, 'elements': {},
+        'ligands': [], 'ligand_counts': Counter(), 'disulfide_bonds': [],
+        'active_sites': [], 'sequences': {}
+    }
+
+    active_site_residues = set()
+    for line in pdb_string.splitlines():
+        if line.startswith("SITE"):
+            parts = line.split()
+            for i in range(4, len(parts), 4):
+                if len(parts) > i + 2:
+                    chain = parts[i]
+                    resnum = parts[i + 1]
+                    resname = parts[i + 2]
+                    active_site_residues.add(f"{chain}:{resnum}:{resname}")
+                    metadata['active_sites'].append({
+                        'chain': chain, 'resnum': resnum, 'resname': resname
+                    })
+
+    for line in pdb_string.splitlines():
+        if line.startswith("TITLE "):
+            metadata["title"] += line[10:].strip() + " "
+        elif line.startswith("EXPDTA"):
+            metadata["experiment"] = line[10:].strip()
+        elif line.startswith("REMARK   2") and "RESOLUTION." in line:
+            try:
+                parts = line.split()
+                idx = parts.index("RESOLUTION.") + 1
+                metadata["resolution"] = parts[idx] + " " + parts[idx + 1]
+            except:
+                pass
+        elif line.startswith("SOURCE") and "ORGANISM_SCIENTIFIC:" in line:
+            try:
+                metadata["organism"] = line.split("ORGANISM_SCIENTIFIC:")[1].split(";")[0].strip()
+            except:
+                pass
+        elif line.startswith("HETATM"):
+            ligand = line[17:20].strip()
+            metadata["ligands"].append(ligand)
+            metadata["ligand_counts"][ligand] += 1
+        elif line.startswith("SSBOND"):
+            metadata["disulfide_bonds"].append(line)
+        elif line.startswith("ATOM"):
+            metadata["atoms"] += 1
+            chain = line[21].strip()
+            if chain:
+                metadata["chains"].add(chain)
+            element = line[76:78].strip()
+            if element:
+                metadata["elements"][element] = metadata["elements"].get(element, 0) + 1
+
+    parser = PDBParser(QUIET=True)
+    structure = parser.get_structure("structure", StringIO(pdb_string))
+    for model in structure:
+        for chain in model:
+            metadata["residues"] += len([res for res in chain.get_residues() if res.id[0] == " "])
+            seq = ""
+            for res in chain:
+                if res.id[0] == " ":
+                    seq += THREE_TO_ONE.get(res.resname, "X")
+            metadata['sequences'][chain.id] = seq
+
+    return metadata
+
+
+def visualize_protein(pdb_string, style="cartoon", chain_colors=None,
+                      show_ss=True, show_ligands=True, ligand_colors=None,
+                      show_active_sites=False, active_site_color="magenta",
+                      bg_color="white", active_site_residues=None, selected_chains=None):
+    view = py3Dmol.view(width=800, height=600)
+    view.addModel(pdb_string, "pdb")
+    view.setBackgroundColor(bg_color)
+
+    if selected_chains is None:
+        selected_chains = list(chain_colors.keys()) if chain_colors else []
+
+    if chain_colors:
+        for chain, color in chain_colors.items():
+            if chain in selected_chains:
+                if color == "spectrum":
+                    view.setStyle({'chain': chain}, {style: {'color': 'spectrum'}})
+                elif color:
+                    view.setStyle({'chain': chain}, {style: {'color': color}})
+                else:
+                    view.setStyle({'chain': chain}, {style: {'color': 'spectrum'}})
+            else:
+                view.setStyle({'chain': chain}, {'cartoon': {'color': 'gray', 'opacity': 0.1}})
+    else:
+        view.setStyle({style: {'color': 'spectrum'}})
+
+    if show_ss:
+        view.addStyle({'helix': True}, {'cartoon': {'color': 'red'}})
+        view.addStyle({'sheet': True}, {'cartoon': {'color': 'yellow'}})
+
+    if show_ligands and ligand_colors:
+        for ligand, color in ligand_colors.items():
+            view.setStyle({'resn': ligand}, {'stick': {'color': color, 'radius': 0.5}})
+            view.setStyle({'resn': ligand}, {'sphere': {'color': color, 'radius': 1.0}})
+
+    if show_active_sites and active_site_residues:
+        for site in active_site_residues:
+            view.addStyle({'chain': site['chain'], 'resi': site['resnum']},
+                          {'sphere': {'color': active_site_color, 'radius': 1.0}})
+            view.addStyle({'chain': site['chain'], 'resi': site['resnum']},
+                          {'stick': {'radius': 0.2}})
+
+    view.zoomTo()
+    view.setHoverable({}, True, """
+    function(atom, viewer, event, container) {
+        if (!atom.label) {
+            atom.label = viewer.addLabel(atom.resn + " " + atom.resi + " (Chain " + atom.chain + ")", 
+                                       {position: atom, backgroundColor: 'mintcream', fontColor:'black'});
+        }
+    }""", """
+    function(atom, viewer) {
+        if (atom.label) {
+            viewer.removeLabel(atom.label);
+            delete atom.label;
+        }
+    }""")
+    return view
+
+
+def ligand_color_controls(ligand_counts):
+    st.subheader("🧪 Ligand Coloring")
+    ligand_colors = {}
+    color_options = ["green", "red", "blue", "yellow", "cyan", "magenta", "orange", "white"]
+    ligands = list(ligand_counts.items())
+    cols = st.columns(min(2, len(ligands)))
+    for i, (ligand, count) in enumerate(ligands):
+        with cols[i % 2]:
+            ligand_colors[ligand] = st.selectbox(
+                f"{ligand} ({count})",
+                options=color_options,
+                index=i % len(color_options),
+                key=f"ligand_color_{ligand}"
+            )
+    return ligand_colors
+
+
+def display_amino_acid_sequences(sequences):
+    st.subheader("🧬 Amino Acid Sequences")
+    for chain, seq in sequences.items():
+        st.markdown(f"**Chain {chain}** (Length: {len(seq)})")
+        chunk_size = 60
+        for i in range(0, len(seq), chunk_size):
+            st.text(f"{i + 1:>4} {seq[i:i + chunk_size]}")
+        st.markdown("---")
+
+
+
+def main():
+    pdb_id = st.text_input("Enter PDB ID (e.g., 1CRN, 6LU7):", "1CRN").strip().upper()
+    if pdb_id:
+        with st.spinner(f"Loading {pdb_id}..."):
+            pdb_data = fetch_pdb(pdb_id)
+
+        if pdb_data:
+            metadata = extract_metadata(pdb_data)
+
+            # Sidebar controls
+            with st.sidebar:
+                st.header("⚙️ Ustawienia")
+                style = st.radio("Styl wizualizacji", ["cartoon", "stick", "surface", "sphere", "line"])
+                color = st.radio("Schemat kolorów", ["spectrum", "chain", "residue"])
+                ligands = st.checkbox("Pokaż ligandy", value=True)
+                translate = st.checkbox("Tłumacz na polski", value=True)
+
+                chains = sorted(metadata['chains']) if metadata['chains'] else ['A', 'B', 'C']
+                selected_chains = st.multiselect("Wybierz łańcuch(y)", chains, default=chains)
+
+                st.markdown("### 🎨 Kolory dla poszczególnych łańcuchów")
+                chain_colors = {}
+                for chain in chains:
+                    default_color = "#FFFFFF"
+                    picked = st.color_picker(f"Kolor dla łańcucha {chain}", value=default_color, key=f"color_{chain}")
+                    chain_colors[chain] = None if picked.upper() == "#FFFFFF" else picked
+
+                if st.button("🔄 Resetuj kolory łańcuchów"):
+                    chain_colors = {chain: None for chain in chains}
+                    st.rerun()
+
+                bg_color = st.selectbox("Tło", ["white", "black", "lightgray"], index=0)
+
+            if metadata['ligand_counts']:
+                ligand_colors = ligand_color_controls(metadata['ligand_counts'])
+            else:
+                ligand_colors = None
+                st.info("No ligands found in this structure.")
+
+            col1, col2 = st.columns([1, 2])
+            with col1:
+                st.subheader("🔍 Protein Information")
+                st.markdown(f"""
+                - **Title:** {metadata['title']}
+                - **Resolution:** {metadata['resolution']}
+                - **Organism:** {metadata['organism']}
+                - **Experiment:** {metadata['experiment']}
+                - **Chains:** {', '.join(sorted(metadata['chains']))}
+                - **Residues:** {metadata['residues']}
+                - **Atoms:** {metadata['atoms']}
+                - **Disulfide Bonds:** {len(metadata['disulfide_bonds'])}
+                - **Active Sites:** {len(metadata['active_sites'])}
+                """)
+
+                display_amino_acid_sequences(metadata['sequences'])
+
+
+            with col2:
+                st.markdown("""
+                **Interaction Guide:**
+                - Hover over atoms to see residue information
+                - Click on atoms to pin information
+                - Click again to remove pinned label
+                """)
+                view = visualize_protein(
+                    pdb_data,
+                    style=style,
+                    chain_colors=chain_colors,
+                    show_ss=True,
+                    show_ligands=ligands,
+                    ligand_colors=ligand_colors,
+                    show_active_sites=len(metadata['active_sites']) > 0,
+                    active_site_color="magenta",
+                    bg_color=bg_color,
+                    active_site_residues=metadata['active_sites'],
+                    selected_chains=selected_chains
+                )
+                st.components.v1.html(view._make_html(), height=600, width=800)
+        else:
+            st.error("Failed to load PDB file. Please check the ID and try again.")
+
+
+if __name__ == "__main__":
+    main()
+
